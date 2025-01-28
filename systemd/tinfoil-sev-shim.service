@@ -1,0 +1,13 @@
+[Unit]
+Description=Tinfoil SEV Shim Service
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/sev-shim
+Restart=always
+RestartSec=5
+User=root
+
+[Install]
+WantedBy=multi-user.target
