@@ -3,13 +3,19 @@ package main
 import (
 	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"net/http"
 
+	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/client"
 
 	"github.com/tinfoilanalytics/verifier/pkg/attestation"
+)
+
+var (
+	listenAddr = flag.String("listen", ":6000", "listen address")
 )
 
 func ownFP() ([]byte, error) {
@@ -21,7 +27,7 @@ func ownFP() ([]byte, error) {
 	return attestation.CertFP(*resp.TLS), nil
 }
 
-func getAttestation() ([]byte, error) {
+func attestationReport() (*attestation.Document, error) {
 	fp, err := ownFP()
 	if err != nil {
 		return nil, err
@@ -33,29 +39,36 @@ func getAttestation() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quote provider: %v", err)
 	}
-	att, err := client.GetQuoteProto(qp, userData)
+	report, err := qp.GetRawQuote(userData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quote: %v", err)
 	}
-	return []byte(att.String()), nil
+
+	if len(report) > abi.ReportSize {
+		report = report[:abi.ReportSize]
+	}
+
+	return &attestation.Document{
+		Format: attestation.SevGuestV1,
+		Body:   base64.StdEncoding.EncodeToString(report),
+	}, nil
 }
 
 func main() {
-	att, err := getAttestation()
+	flag.Parse()
+
+	log.Print("Fetching attestation")
+	att, err := attestationReport()
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		body := attestation.Document{
-			Format: attestation.SevGuestV1,
-			Body:   base64.StdEncoding.EncodeToString(att),
-		}
-
 		w.WriteHeader(http.StatusOK)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(body)
+		json.NewEncoder(w).Encode(att)
 	})
 
-	log.Fatal(http.ListenAndServe(":6000", nil))
+	log.Printf("Listening on %s", *listenAddr)
+	log.Fatal(http.ListenAndServe(*listenAddr, nil))
 }
