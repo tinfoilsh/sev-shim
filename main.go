@@ -22,6 +22,7 @@ var (
 	listenAddr = flag.String("l", ":443", "listen address")
 	domain     = flag.String("d", "", "TLS domain name")
 	email      = flag.String("e", "", "TLS email address")
+	staging    = flag.Bool("s", false, "use staging CA")
 )
 
 func attestationReport(certFP string) (*attestation.Document, error) {
@@ -59,7 +60,11 @@ func main() {
 	mux := http.NewServeMux()
 
 	certmagic.DefaultACME.Email = *email
-	certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
+	if *staging {
+		certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
+	} else {
+		certmagic.DefaultACME.CA = certmagic.LetsEncryptProductionCA
+	}
 	tlsConfig, err := certmagic.TLS([]string{*domain})
 	if err != nil {
 		log.Fatalf("Failed to get TLS config: %v", err)
