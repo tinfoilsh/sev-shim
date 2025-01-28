@@ -13,7 +13,7 @@ builds:
 
 nfpms:
   - package_name: tinfoil-sev-shim
-    file_name_template: "{{ .ProjectName }}_{{ .Version }}"
+    file_name_template: tinfoil-sev-shim
     vendor: Tinfoil
     maintainer: Tinfoil <contact@tinfoil.sh>
     section: utils
