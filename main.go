@@ -25,9 +25,10 @@ import (
 var version = "dev"
 
 var (
-	listenAddr = flag.String("l", ":443", "listen address")
-	staging    = flag.Bool("s", false, "use staging CA")
-	upstream   = flag.Int("u", 8080, "upstream port")
+	listenAddr   = flag.String("l", ":443", "listen address")
+	staging      = flag.Bool("s", false, "use staging CA")
+	upstream     = flag.Int("u", 8080, "upstream port")
+	allowedPaths = flag.String("p", "", "Paths to proxy to the upstream server (all if empty)")
 
 	email = "tls@tinfoil.sh"
 )
@@ -126,6 +127,22 @@ func main() {
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		cors(w, r)
+
+		paths := strings.Split(*allowedPaths, ",")
+		if len(paths) > 0 {
+			allowed := false
+			for _, path := range paths {
+				if r.URL.Path == path {
+					allowed = true
+					break
+				}
+			}
+			if !allowed {
+				http.Error(w, "shim: 403", http.StatusForbidden)
+				return
+			}
+		}
+
 		proxy := httputil.NewSingleHostReverseProxy(&url.URL{
 			Scheme: "http",
 			Host:   fmt.Sprintf("localhost:%d", *upstream),
