@@ -4,10 +4,11 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/sev-shim
+ExecStart=/usr/bin/sev-shim $SEV_SHIM_OPTS
 Restart=always
 RestartSec=5
 User=root
+EnvironmentFile=/etc/default/sev-shim
 
 [Install]
 WantedBy=multi-user.target
