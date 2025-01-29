@@ -1,2 +1,2 @@
 #!/bin/sh
-systemctl disable --now sev-shim.service || true
+systemctl disable --now tinfoil-sev-shim.service || true

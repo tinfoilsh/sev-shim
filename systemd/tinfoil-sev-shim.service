@@ -8,7 +8,7 @@ ExecStart=/usr/bin/sev-shim $SEV_SHIM_OPTS
 Restart=always
 RestartSec=5
 User=root
-EnvironmentFile=/etc/default/sev-shim
+EnvironmentFile=/etc/default/tinfoil-sev-shim
 
 [Install]
 WantedBy=multi-user.target
