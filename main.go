@@ -11,7 +11,6 @@ import (
 	"log"
 	"net/http"
 	"net/http/httputil"
-	"net/url"
 	"os"
 	"strings"
 
@@ -104,7 +103,7 @@ func main() {
 	}
 
 	paths := strings.Split(*allowedPaths, ",")
-	log.Printf("Starting SEV-SNP attestation shim %s domain %s paths %s headers %+v", version, domain, paths, headers)
+	log.Printf("Starting SEV-SNP attestation shim %s domain %s paths %s headers %+v", version, domain, paths, headerMap)
 
 	mux := http.NewServeMux()
 
@@ -140,10 +139,6 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		cors(w, r)
 
-		for k, v := range headerMap {
-			w.Header().Set(k, v)
-		}
-
 		if len(paths) > 0 {
 			allowed := false
 			for _, path := range paths {
@@ -158,10 +153,15 @@ func main() {
 			}
 		}
 
-		proxy := httputil.NewSingleHostReverseProxy(&url.URL{
-			Scheme: "http",
-			Host:   fmt.Sprintf("localhost:%d", *upstream),
-		})
+		proxy := httputil.ReverseProxy{
+			Director: func(req *http.Request) {
+				req.URL.Scheme = "http"
+				req.URL.Host = fmt.Sprintf("127.0.0.1:%d", *upstream)
+				for k, v := range headerMap {
+					req.Header.Add(k, v)
+				}
+			},
+		}
 		proxy.ServeHTTP(w, r)
 	})
 
