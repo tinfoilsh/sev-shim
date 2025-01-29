@@ -92,7 +92,8 @@ func main() {
 		log.Fatal(err)
 	}
 
-	log.Printf("Starting SEV-SNP attestation shim %s domain %s", version, domain)
+	paths := strings.Split(*allowedPaths, ",")
+	log.Printf("Starting SEV-SNP attestation shim %s domain %s paths %s", version, domain, paths)
 
 	mux := http.NewServeMux()
 
@@ -128,7 +129,6 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		cors(w, r)
 
-		paths := strings.Split(*allowedPaths, ",")
 		if len(paths) > 0 {
 			allowed := false
 			for _, path := range paths {
