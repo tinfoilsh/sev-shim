@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"log"
 	"net/http"
 	"net/http/httputil"
 	"os"
@@ -17,6 +16,7 @@ import (
 	"github.com/caddyserver/certmagic"
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/client"
+	log "github.com/sirupsen/logrus"
 
 	"github.com/tinfoilanalytics/verifier/pkg/attestation"
 )
@@ -28,7 +28,7 @@ var (
 	staging      = flag.Bool("s", false, "use staging CA")
 	upstream     = flag.Int("u", 8080, "upstream port")
 	allowedPaths = flag.String("p", "", "Paths to proxy to the upstream server (all if empty)")
-	headers      = flag.String("H", "", "Headers to add upstream")
+	verbose      = flag.Bool("v", false, "verbose logging")
 
 	email = "tls@tinfoil.sh"
 )
@@ -86,24 +86,17 @@ func cors(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	flag.Parse()
+	if *verbose {
+		log.SetLevel(log.DebugLevel)
+	}
 
 	domain, err := cmdlineParam("tinfoil-domain")
 	if err != nil {
 		log.Fatal(err)
 	}
 
-	headerPairs := strings.Split(*headers, ",")
-	headerMap := make(map[string]string, len(headerPairs))
-	for _, pair := range headerPairs {
-		parts := strings.Split(pair, ":")
-		if len(parts) != 2 {
-			log.Fatalf("Invalid header: %s", pair)
-		}
-		headerMap[parts[0]] = parts[1]
-	}
-
 	paths := strings.Split(*allowedPaths, ",")
-	log.Printf("Starting SEV-SNP attestation shim %s domain %s paths %s headers %+v", version, domain, paths, headerMap)
+	log.Printf("Starting SEV-SNP attestation shim %s domain %s paths %s", version, domain, paths)
 
 	mux := http.NewServeMux()
 
@@ -155,11 +148,12 @@ func main() {
 
 		proxy := httputil.ReverseProxy{
 			Director: func(req *http.Request) {
+				log.Debugf("Orig to %+v", req.Header)
 				req.URL.Scheme = "http"
 				req.URL.Host = fmt.Sprintf("127.0.0.1:%d", *upstream)
-				for k, v := range headerMap {
-					req.Header.Add(k, v)
-				}
+				req.Header.Set("Host", "localhost")
+				req.Host = "localhost"
+				log.Debugf("Proxying request to %+v", req.URL.String())
 			},
 		}
 		proxy.ServeHTTP(w, r)
