@@ -28,6 +28,7 @@ var (
 	staging      = flag.Bool("s", false, "use staging CA")
 	upstream     = flag.Int("u", 8080, "upstream port")
 	allowedPaths = flag.String("p", "", "Paths to proxy to the upstream server (all if empty)")
+	certCache    = flag.String("c", "/mnt/ramdisk/certs", "certificate cache directory")
 	verbose      = flag.Bool("v", false, "verbose logging")
 
 	email = "tls@tinfoil.sh"
@@ -101,6 +102,7 @@ func main() {
 	mux := http.NewServeMux()
 
 	// Request TLS certificate
+	certmagic.Default.Storage = &certmagic.FileStorage{Path: *certCache}
 	certmagic.DefaultACME.Email = email
 	if *staging {
 		certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
