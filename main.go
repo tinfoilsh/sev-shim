@@ -75,6 +75,9 @@ func attestationReport(certFP string) (*attestation.Document, error) {
 }
 
 func cors(w http.ResponseWriter, r *http.Request) {
+	w.Header().Del("Access-Control-Allow-Origin")
+	w.Header().Del("Access-Control-Allow-Methods")
+	w.Header().Del("Access-Control-Allow-Headers")
 	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "*")
@@ -132,7 +135,7 @@ func main() {
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		cors(w, r)
+		// cors(w, r)
 
 		if len(paths) > 0 {
 			allowed := false
