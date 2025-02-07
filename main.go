@@ -11,44 +11,33 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
-	"strings"
 
 	"github.com/caddyserver/certmagic"
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/client"
 	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 
 	"github.com/tinfoilanalytics/verifier/pkg/attestation"
 )
 
 var version = "dev"
 
-var (
-	listenAddr   = flag.String("l", ":443", "listen address")
-	staging      = flag.Bool("s", false, "use staging CA")
-	upstream     = flag.Int("u", 8080, "upstream port")
-	allowedPaths = flag.String("p", "", "Paths to proxy to the upstream server (all if empty)")
-	certCache    = flag.String("c", "/mnt/ramdisk/certs", "certificate cache directory")
-	verbose      = flag.Bool("v", false, "verbose logging")
-
-	email = "tls@tinfoil.sh"
-)
-
-// cmdlineParam returns the value of a parameter from the kernel command line
-func cmdlineParam(key string) (string, error) {
-	cmdline, err := os.ReadFile("/proc/cmdline")
-	if err != nil {
-		return "", err
-	}
-
-	for _, p := range strings.Split(string(cmdline), " ") {
-		if strings.HasPrefix(p, key+"=") {
-			return strings.TrimPrefix(p, key+"="), nil
-		}
-	}
-
-	return "", fmt.Errorf("missing %s", key)
+var config struct {
+	Domain       string   `yaml:"domain"`
+	ListenPort   int      `yaml:"listen-port"`
+	UpstreamPort int      `yaml:"upstream-port"`
+	Paths        []string `yaml:"paths"`
+	StagingCA    bool     `yaml:"staging-ca"`
+	Verbose      bool     `yaml:"verbose"`
 }
+
+var (
+	configFile = flag.String("c", "/mnt/ramdisk/shim.yml", "Path to config file")
+
+	email     = "tls@tinfoil.sh"
+	certCache = "/mnt/ramdisk/certs"
+)
 
 // attestationReport gets a SEV-SNP signed attestation report over a TLS certificate fingerprint
 func attestationReport(certFP string) (*attestation.Document, error) {
@@ -90,36 +79,39 @@ func cors(w http.ResponseWriter, r *http.Request) {
 
 func main() {
 	flag.Parse()
-	if *verbose {
+
+	configBytes, err := os.ReadFile(*configFile)
+	if err != nil {
+		log.Fatalf("Failed to read config file: %v", err)
+	}
+	if err := yaml.Unmarshal(configBytes, &config); err != nil {
+		log.Fatalf("Failed to unmarshal config: %v", err)
+	}
+
+	if config.Verbose {
 		log.SetLevel(log.DebugLevel)
 	}
 
-	domain, err := cmdlineParam("tinfoil-domain")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	paths := strings.Split(*allowedPaths, ",")
-	log.Printf("Starting SEV-SNP attestation shim %s domain %s paths %s", version, domain, paths)
+	log.Printf("Starting SEV-SNP attestation shim %s domain %s paths %s", version, config.Domain, config.Paths)
 
 	mux := http.NewServeMux()
 
 	// Request TLS certificate
-	certmagic.Default.Storage = &certmagic.FileStorage{Path: *certCache}
+	certmagic.Default.Storage = &certmagic.FileStorage{Path: certCache}
 	certmagic.DefaultACME.Email = email
-	if *staging {
+	if config.StagingCA {
 		certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
 	} else {
 		certmagic.DefaultACME.CA = certmagic.LetsEncryptProductionCA
 	}
-	tlsConfig, err := certmagic.TLS([]string{domain})
+	tlsConfig, err := certmagic.TLS([]string{config.Domain})
 	if err != nil {
 		log.Fatalf("Failed to get TLS config: %v", err)
 	}
 
 	// Get certificate from TLS config
 	cert, err := tlsConfig.GetCertificate(&tls.ClientHelloInfo{
-		ServerName: domain,
+		ServerName: config.Domain,
 	})
 	if err != nil {
 		log.Fatalf("Failed to get certificate: %v", err)
@@ -137,9 +129,9 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// cors(w, r)
 
-		if len(paths) > 0 {
+		if len(config.Paths) > 0 {
 			allowed := false
-			for _, path := range paths {
+			for _, path := range config.Paths {
 				if r.URL.Path == path {
 					allowed = true
 					break
@@ -155,7 +147,7 @@ func main() {
 			Director: func(req *http.Request) {
 				log.Debugf("Orig to %+v", req.Header)
 				req.URL.Scheme = "http"
-				req.URL.Host = fmt.Sprintf("127.0.0.1:%d", *upstream)
+				req.URL.Host = fmt.Sprintf("127.0.0.1:%d", config.UpstreamPort)
 				req.Header.Set("Host", "localhost")
 				req.Host = "localhost"
 				log.Debugf("Proxying request to %+v", req.URL.String())
@@ -171,11 +163,12 @@ func main() {
 		json.NewEncoder(w).Encode(att)
 	})
 
+	listenAddr := fmt.Sprintf(":%d", config.ListenPort)
 	httpServer := &http.Server{
-		Addr:      *listenAddr,
+		Addr:      listenAddr,
 		Handler:   mux,
 		TLSConfig: tlsConfig,
 	}
-	log.Printf("Listening on %s", *listenAddr)
+	log.Printf("Listening on %s", listenAddr)
 	log.Fatal(httpServer.ListenAndServeTLS("", ""))
 }
