@@ -4,11 +4,10 @@ After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/sev-shim $SEV_SHIM_OPTS
+ExecStart=/usr/bin/sev-shim
 Restart=always
 RestartSec=5
 User=root
-EnvironmentFile=/etc/default/tinfoil-sev-shim
 
 [Install]
 WantedBy=multi-user.target
