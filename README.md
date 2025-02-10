@@ -15,6 +15,7 @@ A reverse proxy service that terminates TLS and exposes an AMD SEV-SNP attestati
 ```yaml
 domain: example.com                # Domain name for TLS certificate (leave empty to generate a self-signed certificate)
 upstream-port: 8080                # Required: upstream HTTP port
+metrics-port: 8081                 # Optional: Prometheus metrics port (disabled if empty)
 listen-port: 443                   # Port to listen on (default: 443)
 paths:                             # Optional: List of allowed paths (default: all)
   - /api/v1

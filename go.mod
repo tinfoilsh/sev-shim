@@ -6,6 +6,7 @@ require (
 	github.com/caddyserver/certmagic v0.21.7
 	github.com/creasty/defaults v1.8.0
 	github.com/google/go-sev-guest v0.12.1
+	github.com/prometheus/client_golang v1.15.1
 	github.com/sirupsen/logrus v1.9.1
 	github.com/tinfoilanalytics/verifier v0.0.9
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
@@ -13,10 +14,13 @@ require (
 )
 
 require (
+	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blocky/nitrite v0.0.1 // indirect
 	github.com/caddyserver/zerossl v0.1.3 // indirect
+	github.com/cespare/xxhash/v2 v2.2.0 // indirect
 	github.com/fxamacker/cbor/v2 v2.7.0 // indirect
 	github.com/go-jose/go-jose/v4 v4.0.2 // indirect
+	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/go-configfs-tsm v0.2.2 // indirect
 	github.com/google/go-containerregistry v0.20.2 // indirect
 	github.com/google/logger v1.1.1 // indirect
@@ -24,9 +28,13 @@ require (
 	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/letsencrypt/boulder v0.0.0-20240620165639-de9c06129bec // indirect
 	github.com/libdns/libdns v0.2.2 // indirect
+	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
 	github.com/mholt/acmez/v3 v3.0.1 // indirect
 	github.com/miekg/dns v1.1.62 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect
+	github.com/prometheus/client_model v0.4.0 // indirect
+	github.com/prometheus/common v0.42.0 // indirect
+	github.com/prometheus/procfs v0.9.0 // indirect
 	github.com/rogpeppe/go-internal v1.13.1 // indirect
 	github.com/secure-systems-lab/go-securesystemslib v0.8.0 // indirect
 	github.com/sigstore/sigstore v1.8.9 // indirect

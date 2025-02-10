@@ -16,6 +16,8 @@ import (
 	"github.com/creasty/defaults"
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/client"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
@@ -28,6 +30,7 @@ var version = "dev"
 var config struct {
 	Domain       string   `yaml:"domain"`
 	ListenPort   int      `yaml:"listen-port" default:"443"`
+	MetricsPort  int      `yaml:"metrics-port"`
 	UpstreamPort int      `yaml:"upstream-port"`
 	Paths        []string `yaml:"paths"`
 	KeyServer    string   `yaml:"key-server"`
@@ -103,6 +106,16 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	requestsMetric := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "sev_shim_proxy_requests_total",
+			Help: "Number of HTTP requests",
+		},
+		[]string{},
+	)
+	r := prometheus.NewRegistry()
+	r.MustRegister(requestsMetric)
+
 	// Request TLS certificate
 	var tlsConfig *tls.Config
 	if config.Domain != "" {
@@ -159,6 +172,8 @@ func main() {
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		requestsMetric.WithLabelValues().Inc()
+
 		auth := r.Header.Get("Authorization")
 
 		if config.KeyServer != "" {
@@ -229,6 +244,14 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(att)
 	})
+
+	if config.MetricsPort > 0 {
+		log.Printf("Starting metrics server on port %d", config.MetricsPort)
+		go func() {
+			listenAddr := fmt.Sprintf(":%d", config.MetricsPort)
+			log.Fatal(http.ListenAndServe(listenAddr, promhttp.HandlerFor(r, promhttp.HandlerOpts{})))
+		}()
+	}
 
 	listenAddr := fmt.Sprintf(":%d", config.ListenPort)
 	httpServer := &http.Server{
