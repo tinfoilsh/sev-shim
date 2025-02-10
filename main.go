@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"golang.org/x/time/rate"
 	"net/http"
 	"net/http/httputil"
 	"os"
@@ -28,7 +29,10 @@ var config struct {
 	ListenPort   int      `yaml:"listen-port"`
 	UpstreamPort int      `yaml:"upstream-port"`
 	Paths        []string `yaml:"paths"`
+	KeyServer    string   `yaml:"key-server"`
 	StagingCA    bool     `yaml:"staging-ca"`
+	RateLimit    float64  `yaml:"rate-limit"`
+	RateBurst    int      `yaml:"rate-burst"`
 	Verbose      bool     `yaml:"verbose"`
 }
 
@@ -128,6 +132,11 @@ func main() {
 		}
 	}
 
+	var rateLimiter *RateLimiter
+	if config.RateLimit > 0 {
+		rateLimiter = NewRateLimiter(rate.Limit(config.RateLimit), config.RateBurst)
+	}
+
 	// Get certificate from TLS config
 	cert, err := tlsConfig.GetCertificate(&tls.ClientHelloInfo{
 		ServerName: config.Domain,
@@ -152,6 +161,41 @@ func main() {
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+
+		if config.KeyServer != "" {
+			req, err := http.NewRequest("POST", config.KeyServer, nil)
+			if err != nil {
+				log.Warnf("Failed to create request: %v", err)
+				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				return
+			}
+			req.Header.Set("Authorization", auth)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				log.Warnf("Failed to proxy request: %v", err)
+				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				return
+			}
+			if resp.StatusCode != http.StatusOK {
+				w.WriteHeader(resp.StatusCode)
+				w.Write([]byte("unauthorized"))
+				return
+			}
+		}
+
+		if rateLimiter != nil {
+			if auth == "" {
+				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				return
+			}
+			limiter := rateLimiter.Limit(auth)
+			if !limiter.Allow() {
+				http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+				return
+			}
+		}
+
 		// cors(w, r)
 
 		if len(config.Paths) > 0 {
