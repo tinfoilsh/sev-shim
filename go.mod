@@ -7,6 +7,8 @@ require (
 	github.com/google/go-sev-guest v0.12.1
 	github.com/sirupsen/logrus v1.9.1
 	github.com/tinfoilanalytics/verifier v0.0.9
+	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -43,6 +45,5 @@ require (
 	golang.org/x/text v0.21.0 // indirect
 	golang.org/x/tools v0.22.0 // indirect
 	google.golang.org/protobuf v1.34.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 	marwan.io/wasm-fetch v0.1.0 // indirect
 )
