@@ -91,22 +91,41 @@ func main() {
 	if config.Verbose {
 		log.SetLevel(log.DebugLevel)
 	}
+	if config.ListenPort == 0 {
+		config.ListenPort = 443
+	}
+	if config.UpstreamPort == 0 {
+		log.Fatalf("Upstream port must be set")
+	}
 
-	log.Printf("Starting SEV-SNP attestation shim %s domain %s paths %s", version, config.Domain, config.Paths)
+	log.Printf("Starting SEV-SNP attestation shim %s: %+v", version, config)
 
 	mux := http.NewServeMux()
 
 	// Request TLS certificate
-	certmagic.Default.Storage = &certmagic.FileStorage{Path: certCache}
-	certmagic.DefaultACME.Email = email
-	if config.StagingCA {
-		certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
+	var tlsConfig *tls.Config
+	if config.Domain != "" {
+		certmagic.Default.Storage = &certmagic.FileStorage{Path: certCache}
+		certmagic.DefaultACME.Email = email
+		if config.StagingCA {
+			certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
+		} else {
+			certmagic.DefaultACME.CA = certmagic.LetsEncryptProductionCA
+		}
+		tlsConfig, err = certmagic.TLS([]string{config.Domain})
+		if err != nil {
+			log.Fatalf("Failed to get TLS config: %v", err)
+		}
 	} else {
-		certmagic.DefaultACME.CA = certmagic.LetsEncryptProductionCA
-	}
-	tlsConfig, err := certmagic.TLS([]string{config.Domain})
-	if err != nil {
-		log.Fatalf("Failed to get TLS config: %v", err)
+		cert, err := tlsCertificate("localhost")
+		if err != nil {
+			log.Fatalf("Failed to generate self signed TLS certificate: %v", err)
+		}
+		tlsConfig = &tls.Config{
+			GetCertificate: func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+				return cert, nil
+			},
+		}
 	}
 
 	// Get certificate from TLS config
@@ -120,10 +139,16 @@ func main() {
 	certFPHex := hex.EncodeToString(certFP[:])
 
 	// Request SEV-SNP attestation
-	log.Printf("Fetching attestation over %s", certFPHex)
-	att, err := attestationReport(certFPHex)
-	if err != nil {
-		log.Fatal(err)
+	var att any
+	if config.Domain == "" {
+		log.Warn("No domain configured, using dummy attestation report")
+		att = []byte(`DUMMY ATTESTATION`)
+	} else {
+		log.Printf("Fetching attestation over %s", certFPHex)
+		att, err = attestationReport(certFPHex)
+		if err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
