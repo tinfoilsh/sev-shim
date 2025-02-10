@@ -8,15 +8,16 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"golang.org/x/time/rate"
 	"net/http"
 	"net/http/httputil"
 	"os"
 
 	"github.com/caddyserver/certmagic"
+	"github.com/creasty/defaults"
 	"github.com/google/go-sev-guest/abi"
 	"github.com/google/go-sev-guest/client"
 	log "github.com/sirupsen/logrus"
+	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
 	"github.com/tinfoilanalytics/verifier/pkg/attestation"
@@ -26,21 +27,20 @@ var version = "dev"
 
 var config struct {
 	Domain       string   `yaml:"domain"`
-	ListenPort   int      `yaml:"listen-port"`
+	ListenPort   int      `yaml:"listen-port" default:"443"`
 	UpstreamPort int      `yaml:"upstream-port"`
 	Paths        []string `yaml:"paths"`
 	KeyServer    string   `yaml:"key-server"`
 	StagingCA    bool     `yaml:"staging-ca"`
 	RateLimit    float64  `yaml:"rate-limit"`
 	RateBurst    int      `yaml:"rate-burst"`
+	CacheDir     string   `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
+	Email        string   `yaml:"email" default:"tls@tinfoil.sh"`
 	Verbose      bool     `yaml:"verbose"`
 }
 
 var (
 	configFile = flag.String("c", "/mnt/ramdisk/shim.yml", "Path to config file")
-
-	email     = "tls@tinfoil.sh"
-	certCache = "/mnt/ramdisk/certs"
 )
 
 // attestationReport gets a SEV-SNP signed attestation report over a TLS certificate fingerprint
@@ -91,15 +91,12 @@ func main() {
 	if err := yaml.Unmarshal(configBytes, &config); err != nil {
 		log.Fatalf("Failed to unmarshal config: %v", err)
 	}
+	if err := defaults.Set(&config); err != nil {
+		log.Fatalf("Failed to set defaults: %v", err)
+	}
 
 	if config.Verbose {
 		log.SetLevel(log.DebugLevel)
-	}
-	if config.ListenPort == 0 {
-		config.ListenPort = 443
-	}
-	if config.UpstreamPort == 0 {
-		log.Fatalf("Upstream port must be set")
 	}
 
 	log.Printf("Starting SEV-SNP attestation shim %s: %+v", version, config)
@@ -109,8 +106,8 @@ func main() {
 	// Request TLS certificate
 	var tlsConfig *tls.Config
 	if config.Domain != "" {
-		certmagic.Default.Storage = &certmagic.FileStorage{Path: certCache}
-		certmagic.DefaultACME.Email = email
+		certmagic.Default.Storage = &certmagic.FileStorage{Path: config.CacheDir}
+		certmagic.DefaultACME.Email = config.Email
 		if config.StagingCA {
 			certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
 		} else {
@@ -121,6 +118,7 @@ func main() {
 			log.Fatalf("Failed to get TLS config: %v", err)
 		}
 	} else {
+		log.Warn("No domain configured, using self signed TLS certificate")
 		cert, err := tlsCertificate("localhost")
 		if err != nil {
 			log.Fatalf("Failed to generate self signed TLS certificate: %v", err)

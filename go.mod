@@ -4,6 +4,7 @@ go 1.23.2
 
 require (
 	github.com/caddyserver/certmagic v0.21.7
+	github.com/creasty/defaults v1.8.0
 	github.com/google/go-sev-guest v0.12.1
 	github.com/sirupsen/logrus v1.9.1
 	github.com/tinfoilanalytics/verifier v0.0.9
