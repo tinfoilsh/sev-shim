@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"os"
+	"strings"
 
 	"github.com/caddyserver/certmagic"
 	"github.com/creasty/defaults"
@@ -19,27 +20,28 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
+	"github.com/tinfoilanalytics/verifier/pkg/attestation"
 	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
-	"github.com/tinfoilanalytics/verifier/pkg/attestation"
+	"github.com/tinfoilanalytics/sev-shim/key"
 )
 
 var version = "dev"
 
 var config struct {
-	Domain       string   `yaml:"domain"`
-	ListenPort   int      `yaml:"listen-port" default:"443"`
-	MetricsPort  int      `yaml:"metrics-port"`
-	UpstreamPort int      `yaml:"upstream-port"`
-	Paths        []string `yaml:"paths"`
-	KeyServer    string   `yaml:"key-server"`
-	StagingCA    bool     `yaml:"staging-ca"`
-	RateLimit    float64  `yaml:"rate-limit"`
-	RateBurst    int      `yaml:"rate-burst"`
-	CacheDir     string   `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
-	Email        string   `yaml:"email" default:"tls@tinfoil.sh"`
-	Verbose      bool     `yaml:"verbose"`
+	Domain             string   `yaml:"domain"`
+	ListenPort         int      `yaml:"listen-port" default:"443"`
+	MetricsPort        int      `yaml:"metrics-port"`
+	UpstreamPort       int      `yaml:"upstream-port"`
+	Paths              []string `yaml:"paths"`
+	APISignerPublicKey string   `yaml:"api-signer-public-key"`
+	StagingCA          bool     `yaml:"staging-ca"`
+	RateLimit          float64  `yaml:"rate-limit"`
+	RateBurst          int      `yaml:"rate-burst"`
+	CacheDir           string   `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
+	Email              string   `yaml:"email" default:"tls@tinfoil.sh"`
+	Verbose            bool     `yaml:"verbose"`
 }
 
 var (
@@ -103,6 +105,11 @@ func main() {
 	}
 
 	log.Printf("Starting SEV-SNP attestation shim %s: %+v", version, config)
+
+	verifier, err := key.NewVerifier(config.APISignerPublicKey)
+	if err != nil {
+		log.Fatalf("Failed to create verifier: %v", err)
+	}
 
 	mux := http.NewServeMux()
 
@@ -174,35 +181,22 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		requestsMetric.WithLabelValues().Inc()
 
-		auth := r.Header.Get("Authorization")
+		apiKey := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 
-		if config.KeyServer != "" {
-			req, err := http.NewRequest("POST", config.KeyServer, nil)
-			if err != nil {
-				log.Warnf("Failed to create request: %v", err)
+		if config.APISignerPublicKey != "" {
+			if err := verifier.Verify(apiKey); err != nil {
+				log.Warnf("Failed to verify API key: %v", err)
 				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-				return
-			}
-			req.Header.Set("Authorization", auth)
-			resp, err := http.DefaultClient.Do(req)
-			if err != nil {
-				log.Warnf("Failed to proxy request: %v", err)
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
-				return
-			}
-			if resp.StatusCode != http.StatusOK {
-				w.WriteHeader(resp.StatusCode)
-				w.Write([]byte("unauthorized"))
 				return
 			}
 		}
 
 		if rateLimiter != nil {
-			if auth == "" {
+			if apiKey == "" {
 				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 				return
 			}
-			limiter := rateLimiter.Limit(auth)
+			limiter := rateLimiter.Limit(apiKey)
 			if !limiter.Allow() {
 				http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
 				return
