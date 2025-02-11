@@ -34,7 +34,7 @@ The report includes a SHA-256 hash of the TLS certificate in the user data field
 
 ## Authorization
 
-Authorization is shared between the sev-shim and an external authorization provider. The only shared data (not a secret) is the public key of the API key signer. To require authorization and optionally enable rate limiting, set the `api-signer-public-key` option to the public key of the API key signer. See [the example key signer](https://github.com/tinfoilanalytics/sev-shim/blob/main/keygen/main.go) for a simple implementation.
+Authorization is shared between the sev-shim and an external authorization provider. The only shared data (not a secret) is the public key of the API key signer. To require authorization and optionally enable rate limiting, set the `api-signer-public-key` option to the public key of the API key signer. See [the example key signer](https://github.com/tinfoilsh/sev-shim/blob/main/keygen/main.go) for a simple implementation.
 
 For each every request to the upstream (the attestation endpoint is excluded from authorization), the shim will check if the `Authorization: Bearer ...` header is set and attempt to verify the token agains the configured public key. The signed key includes a validity period that is controlled by the key signer.
 

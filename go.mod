@@ -1,4 +1,4 @@
-module github.com/tinfoilanalytics/sev-shim
+module github.com/tinfoilsh/sev-shim
 
 go 1.23.2
 
@@ -9,7 +9,7 @@ require (
 	github.com/prometheus/client_golang v1.15.1
 	github.com/sirupsen/logrus v1.9.1
 	github.com/stretchr/testify v1.9.0
-	github.com/tinfoilanalytics/verifier v0.0.9
+	github.com/tinfoilsh/verifier v0.0.9
 	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac
 	gopkg.in/yaml.v3 v3.0.1
 )

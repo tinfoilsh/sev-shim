@@ -20,11 +20,11 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
-	"github.com/tinfoilanalytics/verifier/pkg/attestation"
+	"github.com/tinfoilsh/verifier/pkg/attestation"
 	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
-	"github.com/tinfoilanalytics/sev-shim/key"
+	"github.com/tinfoilsh/sev-shim/key"
 )
 
 var version = "dev"
