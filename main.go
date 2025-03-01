@@ -30,7 +30,7 @@ import (
 var version = "dev"
 
 var config struct {
-	Domain             string   `yaml:"domain"`
+	Domains            []string `yaml:"domains"`
 	ListenPort         int      `yaml:"listen-port" default:"443"`
 	MetricsPort        int      `yaml:"metrics-port"`
 	UpstreamPort       int      `yaml:"upstream-port"`
@@ -125,7 +125,7 @@ func main() {
 
 	// Request TLS certificate
 	var tlsConfig *tls.Config
-	if config.Domain != "" {
+	if len(config.Domains) > 0 {
 		certmagic.Default.Storage = &certmagic.FileStorage{Path: config.CacheDir}
 		certmagic.DefaultACME.Email = config.Email
 		if config.StagingCA {
@@ -133,7 +133,7 @@ func main() {
 		} else {
 			certmagic.DefaultACME.CA = certmagic.LetsEncryptProductionCA
 		}
-		tlsConfig, err = certmagic.TLS([]string{config.Domain})
+		tlsConfig, err = certmagic.TLS(config.Domains)
 		if err != nil {
 			log.Fatalf("Failed to get TLS config: %v", err)
 		}
@@ -155,22 +155,22 @@ func main() {
 		rateLimiter = NewRateLimiter(rate.Limit(config.RateLimit), config.RateBurst)
 	}
 
-	// Get certificate from TLS config
-	cert, err := tlsConfig.GetCertificate(&tls.ClientHelloInfo{
-		ServerName: config.Domain,
-	})
-	if err != nil {
-		log.Fatalf("Failed to get certificate: %v", err)
-	}
-	certFP := sha256.Sum256(cert.Leaf.Raw)
-	certFPHex := hex.EncodeToString(certFP[:])
-
 	// Request SEV-SNP attestation
 	var att any
-	if config.Domain == "" {
+	if len(config.Domains) == 0 {
 		log.Warn("No domain configured, using dummy attestation report")
 		att = []byte(`DUMMY ATTESTATION`)
 	} else {
+		// Get certificate from TLS config
+		cert, err := tlsConfig.GetCertificate(&tls.ClientHelloInfo{
+			ServerName: config.Domains[0],
+		})
+		if err != nil {
+			log.Fatalf("Failed to get certificate: %v", err)
+		}
+		certFP := sha256.Sum256(cert.Leaf.Raw)
+		certFPHex := hex.EncodeToString(certFP[:])
+
 		log.Printf("Fetching attestation over %s", certFPHex)
 		att, err = attestationReport(certFPHex)
 		if err != nil {
