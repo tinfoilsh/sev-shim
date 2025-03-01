@@ -20,7 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
-	"github.com/tinfoilsh/verifier/pkg/attestation"
+	"github.com/tinfoilsh/verifier/attestation"
 	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
