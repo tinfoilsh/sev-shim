@@ -2,3 +2,4 @@
 dist/
 sev-shim
 config.yml
+signer.json
