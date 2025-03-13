@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/tinfoilsh/sev-shim/key"
+	"github.com/tinfoilsh/sev-shim/key/offline"
 )
 
 var (
@@ -17,7 +17,7 @@ var (
 func main() {
 	flag.Parse()
 
-	keySigner, err := key.NewSigner(*validity)
+	keySigner, err := offline.NewSigner(*validity)
 	if err != nil {
 		log.Fatalf("Failed to create key signer: %v", err)
 	}

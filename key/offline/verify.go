@@ -1,4 +1,4 @@
-package key
+package offline
 
 import (
 	"crypto/ed25519"
@@ -7,23 +7,23 @@ import (
 	"time"
 )
 
-type Verifier struct {
+type Validator struct {
 	publicKey ed25519.PublicKey
 }
 
-func NewVerifier(publicKey string) (*Verifier, error) {
+func NewValidator(publicKey string) (*Validator, error) {
 	pk, err := base64.RawURLEncoding.DecodeString(publicKey)
 	if err != nil {
 		return nil, err
 	}
 
-	return &Verifier{
+	return &Validator{
 		publicKey: pk,
 	}, nil
 }
 
-// Verify checks if an API key is signed and not expired
-func (v *Verifier) Verify(apiKey string) error {
+// Validate checks if an API key is signed and not expired
+func (v *Validator) Validate(apiKey string) error {
 	data, err := base64.RawURLEncoding.DecodeString(apiKey)
 	if err != nil {
 		return ErrInvalidKeyFormat
