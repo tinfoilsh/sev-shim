@@ -1,4 +1,4 @@
-package key
+package offline
 
 import (
 	"crypto/ed25519"

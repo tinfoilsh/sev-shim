@@ -1,4 +1,4 @@
-package key
+package offline
 
 import (
 	"testing"
@@ -7,7 +7,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestKeySignVerify(t *testing.T) {
+func TestOfflineKeySignValidate(t *testing.T) {
 	signer, err := NewSigner(24 * time.Hour)
 	assert.Nil(t, err)
 
@@ -19,24 +19,24 @@ func TestKeySignVerify(t *testing.T) {
 
 	assert.NotEqual(t, key1, key2)
 
-	verifier, err := NewVerifier(signer.PubKey())
+	verifier, err := NewValidator(signer.PubKey())
 
-	assert.Nil(t, verifier.Verify(key1))
-	assert.Nil(t, verifier.Verify(key2))
-	assert.NotNil(t, verifier.Verify(key1+"a"))
+	assert.Nil(t, verifier.Validate(key1))
+	assert.Nil(t, verifier.Validate(key2))
+	assert.NotNil(t, verifier.Validate(key1+"a"))
 }
 
-func TestKeyExpiry(t *testing.T) {
+func TestOfflineKeyExpiry(t *testing.T) {
 	signer, err := NewSigner(1 * time.Second)
 	assert.Nil(t, err)
 
 	key, err := signer.NewAPIKey()
 	assert.Nil(t, err)
 
-	verifier, err := NewVerifier(signer.PubKey())
+	verifier, err := NewValidator(signer.PubKey())
 	assert.Nil(t, err)
 
-	assert.Nil(t, verifier.Verify(key))
+	assert.Nil(t, verifier.Validate(key))
 	time.Sleep(2 * time.Second)
-	assert.NotNil(t, verifier.Verify(key))
+	assert.NotNil(t, verifier.Validate(key))
 }

@@ -1,20 +1,18 @@
 package key
 
 import (
-	"crypto/ed25519"
-	"fmt"
+	"errors"
+	"github.com/tinfoilsh/sev-shim/key/offline"
+	"github.com/tinfoilsh/sev-shim/key/online"
 )
 
-const (
-	nonceSize     = 16
-	timestampSize = 8
-	validitySize  = 8
-	totalSize     = nonceSize + timestampSize + validitySize + ed25519.SignatureSize
-)
+var ErrAPIKeyRequired = errors.New("API key required")
+
+type Validator interface {
+	Validate(apiKey string) error
+}
 
 var (
-	ErrInvalidKeyFormat = fmt.Errorf("invalid key format")
-	ErrInvalidKeyLength = fmt.Errorf("invalid key length")
-	ErrAPIKeyExpired    = fmt.Errorf("API key has expired")
-	ErrInvalidSignature = fmt.Errorf("invalid key signature")
+	_ Validator = &offline.Validator{}
+	_ Validator = &online.Validator{}
 )

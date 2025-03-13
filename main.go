@@ -25,23 +25,31 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/tinfoilsh/sev-shim/key"
+	"github.com/tinfoilsh/sev-shim/key/offline"
+	"github.com/tinfoilsh/sev-shim/key/online"
 )
 
 var version = "dev"
 
 var config struct {
-	Domains            []string `yaml:"domains"`
-	ListenPort         int      `yaml:"listen-port" default:"443"`
-	MetricsPort        int      `yaml:"metrics-port"`
-	UpstreamPort       int      `yaml:"upstream-port"`
-	Paths              []string `yaml:"paths"`
-	APISignerPublicKey string   `yaml:"api-signer-public-key"`
-	StagingCA          bool     `yaml:"staging-ca"`
-	RateLimit          float64  `yaml:"rate-limit"`
-	RateBurst          int      `yaml:"rate-burst"`
-	CacheDir           string   `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
-	Email              string   `yaml:"email" default:"tls@tinfoil.sh"`
-	Verbose            bool     `yaml:"verbose"`
+	Domains      []string `yaml:"domains"`
+	ListenPort   int      `yaml:"listen-port" default:"443"`
+	MetricsPort  int      `yaml:"metrics-port"`
+	UpstreamPort int      `yaml:"upstream-port"`
+	Paths        []string `yaml:"paths"`
+
+	// Mutually exclusive
+	APIKeySignerPublicKey  string `yaml:"key-signer-public-key"`
+	APIKeyValidationServer string `yaml:"key-validation-server"`
+
+	LLMMetricsServer string `yaml:"llm-metrics-server"` // If metrics server is set, paths is automatically overridden to only /v1/chat/completions
+
+	StagingCA bool    `yaml:"staging-ca"`
+	RateLimit float64 `yaml:"rate-limit"`
+	RateBurst int     `yaml:"rate-burst"`
+	CacheDir  string  `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
+	Email     string  `yaml:"email" default:"tls@tinfoil.sh"`
+	Verbose   bool    `yaml:"verbose"`
 }
 
 var (
@@ -106,9 +114,29 @@ func main() {
 
 	log.Printf("Starting SEV-SNP attestation shim %s: %+v", version, config)
 
-	verifier, err := key.NewVerifier(config.APISignerPublicKey)
-	if err != nil {
-		log.Fatalf("Failed to create verifier: %v", err)
+	if config.APIKeySignerPublicKey != "" && config.APIKeyValidationServer != "" {
+		log.Fatal("API signer public key and validation server are mutually exclusive")
+	}
+
+	if config.LLMMetricsServer != "" {
+		log.Warn("LLM metrics server enabled, overriding paths to /v1/chat/completions")
+		config.Paths = []string{"/v1/chat/completions"}
+	}
+
+	var validator key.Validator
+	if config.APIKeySignerPublicKey != "" { // Offline API key mode
+		validator, err = offline.NewValidator(config.APIKeySignerPublicKey)
+		if err != nil {
+			log.Fatalf("Failed to initialize offline API key verifier: %v", err)
+		}
+	} else if config.APIKeyValidationServer != "" { // Online API key mode
+		validator, err = online.NewValidator(config.APIKeyValidationServer)
+		if err != nil {
+			log.Fatalf("Failed to initialize online API key verifier: %v", err)
+		}
+	} else {
+		validator = nil
+		log.Warn("API key verification disabled")
 	}
 
 	mux := http.NewServeMux()
@@ -182,10 +210,14 @@ func main() {
 		requestsMetric.WithLabelValues().Inc()
 
 		apiKey := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if validator != nil {
+			if len(apiKey) == 0 {
+				http.Error(w, key.ErrAPIKeyRequired.Error(), http.StatusUnauthorized)
+				return
+			}
 
-		if config.APISignerPublicKey != "" {
-			if err := verifier.Verify(apiKey); err != nil {
-				log.Warnf("Failed to verify API key: %v", err)
+			if err := validator.Validate(apiKey); err != nil {
+				log.Warnf("Failed to validate API key: %v", err)
 				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 				return
 			}
@@ -193,7 +225,7 @@ func main() {
 
 		if rateLimiter != nil {
 			if apiKey == "" {
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				http.Error(w, key.ErrAPIKeyRequired.Error(), http.StatusUnauthorized)
 				return
 			}
 			limiter := rateLimiter.Limit(apiKey)
@@ -219,6 +251,17 @@ func main() {
 			}
 		}
 
+		var writer http.ResponseWriter
+		if config.LLMMetricsServer != "" {
+			writer = &responseWriter{
+				Server:         config.LLMMetricsServer,
+				ResponseWriter: w,
+				APIKey:         apiKey,
+			}
+		} else {
+			writer = w
+		}
+
 		proxy := httputil.ReverseProxy{
 			Director: func(req *http.Request) {
 				log.Debugf("Orig to %+v", req.Header)
@@ -229,7 +272,8 @@ func main() {
 				log.Debugf("Proxying request to %+v", req.URL.String())
 			},
 		}
-		proxy.ServeHTTP(w, r)
+
+		proxy.ServeHTTP(writer, r)
 	})
 
 	mux.HandleFunc("/.well-known/tinfoil-attestation", func(w http.ResponseWriter, r *http.Request) {
