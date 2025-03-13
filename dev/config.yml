@@ -1,0 +1,3 @@
+upstream-port: 11434
+key-validation-server: http://localhost:8087/validate
+llm-metrics-server: http://localhost:8087/collect
