@@ -39,8 +39,10 @@ var config struct {
 	Paths        []string `yaml:"paths"`
 
 	// Mutually exclusive
-	APIKeySignerPublicKey    string `yaml:"key-signer-public-key"`
-	APIKeyVerificationServer string `yaml:"key-verification-server"`
+	APIKeySignerPublicKey  string `yaml:"key-signer-public-key"`
+	APIKeyValidationServer string `yaml:"key-validation-server"`
+
+	LLMMetricsServer string `yaml:"llm-metrics-server"` // If metrics server is set, paths is automatically overridden to only /v1/chat/completions
 
 	StagingCA bool    `yaml:"staging-ca"`
 	RateLimit float64 `yaml:"rate-limit"`
@@ -112,8 +114,13 @@ func main() {
 
 	log.Printf("Starting SEV-SNP attestation shim %s: %+v", version, config)
 
-	if config.APIKeySignerPublicKey != "" && config.APIKeyVerificationServer != "" {
-		log.Fatal("API signer public key and verification server are mutually exclusive")
+	if config.APIKeySignerPublicKey != "" && config.APIKeyValidationServer != "" {
+		log.Fatal("API signer public key and validation server are mutually exclusive")
+	}
+
+	if config.LLMMetricsServer != "" {
+		log.Warn("LLM metrics server enabled, overriding paths to /v1/chat/completions")
+		config.Paths = []string{"/v1/chat/completions"}
 	}
 
 	var validator key.Validator
@@ -122,8 +129,8 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to initialize offline API key verifier: %v", err)
 		}
-	} else if config.APIKeyVerificationServer != "" { // Online API key mode
-		validator, err = online.NewValidator(config.APIKeyVerificationServer)
+	} else if config.APIKeyValidationServer != "" { // Online API key mode
+		validator, err = online.NewValidator(config.APIKeyValidationServer)
 		if err != nil {
 			log.Fatalf("Failed to initialize online API key verifier: %v", err)
 		}
@@ -244,6 +251,17 @@ func main() {
 			}
 		}
 
+		var writer http.ResponseWriter
+		if config.LLMMetricsServer != "" {
+			writer = &responseWriter{
+				Server:         config.LLMMetricsServer,
+				ResponseWriter: w,
+				APIKey:         apiKey,
+			}
+		} else {
+			writer = w
+		}
+
 		proxy := httputil.ReverseProxy{
 			Director: func(req *http.Request) {
 				log.Debugf("Orig to %+v", req.Header)
@@ -254,7 +272,8 @@ func main() {
 				log.Debugf("Proxying request to %+v", req.URL.String())
 			},
 		}
-		proxy.ServeHTTP(w, r)
+
+		proxy.ServeHTTP(writer, r)
 	})
 
 	mux.HandleFunc("/.well-known/tinfoil-attestation", func(w http.ResponseWriter, r *http.Request) {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"io"
 	"log"
@@ -17,7 +18,7 @@ var (
 func main() {
 	flag.Parse()
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/validate", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
 			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 			return
@@ -37,6 +38,21 @@ func main() {
 
 		log.Printf("Accepted request with API key: %s", apiKey)
 		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
+	http.HandleFunc("/collect", func(w http.ResponseWriter, r *http.Request) {
+		var b struct {
+			APIKey string `json:"api_key"`
+			Tokens int    `json:"tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		log.Printf("Received %d tokens for API key: %s", b.Tokens, b.APIKey)
+
 		w.Write([]byte("OK"))
 	})
 
