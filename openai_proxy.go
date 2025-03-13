@@ -16,12 +16,14 @@ type responseWriter struct {
 }
 
 type oneShotResponse struct {
+	Model string `json:"model"`
 	Usage struct {
 		TotalTokens int `json:"total_tokens"`
 	} `json:"usage"`
 }
 
 type streamingResponse struct {
+	Model   string `json:"model"`
 	Choices []struct {
 		Delta struct {
 			Role    string `json:"role"`
@@ -30,13 +32,15 @@ type streamingResponse struct {
 	} `json:"choices"`
 }
 
-func (w *responseWriter) account(tokens int) {
+func (w *responseWriter) account(tokens int, model string) {
 	var b struct {
 		APIKey string `json:"api_key"`
 		Tokens int    `json:"tokens"`
+		Model  string `json:"model"`
 	}
 	b.APIKey = w.APIKey
 	b.Tokens = tokens
+	b.Model = model
 
 	body, err := json.Marshal(b)
 	if err != nil {
@@ -60,6 +64,7 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 
 	isStream := strings.Contains(w.Header().Get("Content-Type"), "text/event-stream")
 	if isStream {
+		var model string
 		lines := strings.Split(string(b), "\n")
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
@@ -74,7 +79,7 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 
 			if data == "[DONE]" {
 				tokens := w.streamContentLength / 4
-				w.account(tokens)
+				w.account(tokens, model)
 				continue
 			}
 
@@ -82,6 +87,9 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 			if err := json.Unmarshal([]byte(data), &resp); err != nil {
 				log.Warnf("Failed to unmarshal streaming response for data '%s': %v", data, err)
 				continue
+			}
+			if resp.Model != "" {
+				model = resp.Model
 			}
 
 			if len(resp.Choices) > 0 {
@@ -96,7 +104,7 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 		if err := json.Unmarshal(b, &resp); err != nil {
 			log.Warnf("Failed to unmarshal response: %v", err)
 		} else {
-			w.account(resp.Usage.TotalTokens)
+			w.account(resp.Usage.TotalTokens, resp.Model)
 		}
 	}
 
