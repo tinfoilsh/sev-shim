@@ -201,7 +201,7 @@ func main() {
 		requestsMetric.WithLabelValues().Inc()
 
 		apiKey := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		if validator != nil {
+		if validator != nil && r.URL.Path == "/v1/chat/completions" {
 			if len(apiKey) == 0 {
 				http.Error(w, key.ErrAPIKeyRequired.Error(), http.StatusUnauthorized)
 				return
