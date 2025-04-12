@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"crypto/tls"
 	"encoding/base64"
@@ -8,8 +9,10 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httputil"
+	"net/url"
 	"os"
 	"strings"
 
@@ -25,7 +28,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/tinfoilsh/sev-shim/key"
-	"github.com/tinfoilsh/sev-shim/key/offline"
 	"github.com/tinfoilsh/sev-shim/key/online"
 )
 
@@ -38,11 +40,7 @@ var config struct {
 	UpstreamPort int      `yaml:"upstream-port"`
 	Paths        []string `yaml:"paths"`
 
-	// Mutually exclusive
-	APIKeySignerPublicKey  string `yaml:"key-signer-public-key"`
-	APIKeyValidationServer string `yaml:"key-validation-server"`
-
-	LLMMetricsServer string `yaml:"llm-metrics-server"` // If metrics server is set, paths is automatically overridden to only /v1/chat/completions
+	ControlPlane string `yaml:"control-plane"`
 
 	StagingCA bool    `yaml:"staging-ca"`
 	RateLimit float64 `yaml:"rate-limit"`
@@ -114,23 +112,16 @@ func main() {
 
 	log.Printf("Starting SEV-SNP attestation shim %s: %+v", version, config)
 
-	if config.APIKeySignerPublicKey != "" && config.APIKeyValidationServer != "" {
-		log.Fatal("API signer public key and validation server are mutually exclusive")
-	}
-
-	if config.LLMMetricsServer != "" {
-		log.Warn("LLM metrics server enabled, overriding paths to /v1/chat/completions")
-		config.Paths = []string{"/v1/chat/completions"}
-	}
-
 	var validator key.Validator
-	if config.APIKeySignerPublicKey != "" { // Offline API key mode
-		validator, err = offline.NewValidator(config.APIKeySignerPublicKey)
+	var controlPlaneURL *url.URL
+
+	if config.ControlPlane != "" {
+		controlPlaneURL, err = url.Parse(config.ControlPlane)
 		if err != nil {
-			log.Fatalf("Failed to initialize offline API key verifier: %v", err)
+			log.Fatalf("Failed to parse control plane URL: %v", err)
 		}
-	} else if config.APIKeyValidationServer != "" { // Online API key mode
-		validator, err = online.NewValidator(config.APIKeyValidationServer)
+
+		validator, err = online.NewValidator(controlPlaneURL.JoinPath("api", "shim", "validate").String())
 		if err != nil {
 			log.Fatalf("Failed to initialize online API key verifier: %v", err)
 		}
@@ -251,20 +242,41 @@ func main() {
 			}
 		}
 
-		var writer http.ResponseWriter
-		if config.LLMMetricsServer != "" {
+		var writer http.ResponseWriter = w
+		if controlPlaneURL != nil && r.URL.Path == "/v1/chat/completions" {
+			body, err := io.ReadAll(r.Body)
+			if err != nil {
+				log.Warnf("Failed to read request body: %v", err)
+				http.Error(w, "shim: 400", http.StatusBadRequest)
+				return
+			}
+			r.Body.Close()
+
+			var chatRequest chatRequest
+			if err := json.Unmarshal(body, &chatRequest); err != nil {
+				log.Warnf("Failed to decode chat request: %v", err)
+				http.Error(w, "shim: 400", http.StatusBadRequest)
+				return
+			}
+
+			var inputTokens int
+			for _, message := range chatRequest.Messages {
+				inputTokens += len(message.Content) / 4
+				log.Debugf("Input tokens: %d", inputTokens)
+			}
+
 			writer = &responseWriter{
-				Server:         config.LLMMetricsServer,
+				InputTokens:    inputTokens,
+				Server:         controlPlaneURL.JoinPath("api", "shim", "collect").String(),
 				ResponseWriter: w,
 				APIKey:         apiKey,
 			}
-		} else {
-			writer = w
+
+			r.Body = io.NopCloser(bytes.NewReader(body))
 		}
 
 		proxy := httputil.ReverseProxy{
 			Director: func(req *http.Request) {
-				log.Debugf("Orig to %+v", req.Header)
 				req.URL.Scheme = "http"
 				req.URL.Host = fmt.Sprintf("127.0.0.1:%d", config.UpstreamPort)
 				req.Header.Set("Host", "localhost")
