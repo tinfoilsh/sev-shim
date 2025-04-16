@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"sort"
 	"strings"
 
 	"github.com/tinfoilsh/verifier/attestation"
@@ -51,12 +52,13 @@ func Encode(att *attestation.Document, domain string) ([]string, error) {
 
 	// Chunk
 	domainSuffix := "." + domain
-	maxLength := 63 - len(domainSuffix)
+	maxLength := 63 - len(domainSuffix) - 2 // Reserve space for NN prefix
 	var domains []string
 	for i := 0; i < len(encoded); i += maxLength {
 		end := min(i+maxLength, len(encoded))
 		chunk := encoded[i:end]
-		domains = append(domains, chunk+domainSuffix)
+		index := len(domains)
+		domains = append(domains, fmt.Sprintf("%02d%s%s", index, chunk, domainSuffix))
 	}
 
 	return domains, nil
@@ -64,10 +66,17 @@ func Encode(att *attestation.Document, domain string) ([]string, error) {
 
 // Decode decodes a string of domains into an attestation document
 func Decode(domains []string) (*attestation.Document, error) {
+	// Sort domains by their NN prefix
+	sort.Slice(domains, func(i, j int) bool {
+		return domains[i][:2] < domains[j][:2]
+	})
+
+	// Extract encoded data from the domains
 	var encodedData string
 	for _, domain := range domains {
 		domain = strings.Split(domain, ".")[0]
-		encodedData += domain
+		// Remove the 2-digit prefix
+		encodedData += domain[2:]
 	}
 
 	// Decode base32

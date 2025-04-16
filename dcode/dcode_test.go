@@ -2,6 +2,7 @@ package dcode
 
 import (
 	"encoding/json"
+	"math/rand/v2"
 	"strings"
 	"testing"
 
@@ -25,6 +26,15 @@ func TestDcode(t *testing.T) {
 	}
 
 	t.Logf("encoded %d bytes into %d domains", len(attJSON), len(domains))
+
+	// Randomize domain order
+	rand.Shuffle(len(domains), func(i, j int) {
+		domains[i], domains[j] = domains[j], domains[i]
+	})
+
+	for _, domain := range domains {
+		t.Logf("domain: %s", domain)
+	}
 
 	decoded, err := Decode(domains)
 	assert.Nil(t, err)
