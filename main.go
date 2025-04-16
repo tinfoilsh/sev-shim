@@ -17,9 +17,6 @@ import (
 	"slices"
 	"strings"
 
-	"golang.org/x/crypto/acme"
-	"golang.org/x/crypto/acme/autocert"
-
 	"github.com/creasty/defaults"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -165,36 +162,29 @@ func main() {
 	}
 
 	// Request TLS certificate
-	var tlsConfig *tls.Config
+	var cert *tls.Certificate
 	if domain != "localhost" {
-		log.Info("Requesting TLS certificate")
-		certManager := autocert.Manager{
-			Prompt:     autocert.AcceptTOS,
-			Cache:      autocert.DirCache(config.CacheDir),
-			HostPolicy: autocert.HostWhitelist(domains...),
-			Email:      config.Email,
-			Client: &acme.Client{
-				Key:          privateKey,
-				DirectoryURL: autocert.DefaultACMEDirectory,
-			},
+		certManager, err := tlsutil.NewCertManager(config.Email, privateKey)
+		if err != nil {
+			log.Fatalf("Failed to create cert manager: %v", err)
 		}
-		tlsConfig = &tls.Config{
-			GetCertificate:   certManager.GetCertificate,
-			NextProtos:       []string{"h2", "http/1.1", acme.ALPNProto},
-			MinVersion:       tls.VersionTLS13,
-			CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP384},
+		log.Info("Requesting TLS certificate")
+		cert, err = certManager.RequestCert(domains)
+		if err != nil {
+			log.Fatalf("Failed to request TLS certificate: %v", err)
 		}
 	} else {
 		log.Warn("No domain configured, using self signed TLS certificate")
-		cert, err := tlsutil.Certificate(privateKey, domains...)
+		cert, err = tlsutil.Certificate(privateKey, domains...)
 		if err != nil {
 			log.Fatalf("Failed to generate self signed TLS certificate: %v", err)
 		}
-		tlsConfig = &tls.Config{
-			GetCertificate: func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
-				return cert, nil
-			},
-		}
+	}
+
+	tlsConfig := &tls.Config{
+		GetCertificate: func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return cert, nil
+		},
 	}
 
 	var rateLimiter *RateLimiter
