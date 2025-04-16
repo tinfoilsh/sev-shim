@@ -51,7 +51,7 @@ func Encode(att *attestation.Document, domain string) ([]string, error) {
 
 	// Chunk
 	domainSuffix := "." + domain
-	maxLength := 253 - len(domainSuffix)
+	maxLength := 63 - len(domainSuffix)
 	var domains []string
 	for i := 0; i < len(encoded); i += maxLength {
 		end := min(i+maxLength, len(encoded))
@@ -64,15 +64,15 @@ func Encode(att *attestation.Document, domain string) ([]string, error) {
 
 // Decode decodes a string of domains into an attestation document
 func Decode(domains []string) (*attestation.Document, error) {
-	var encodedData []byte
+	var encodedData string
 	for _, domain := range domains {
 		domain = strings.Split(domain, ".")[0]
-		encodedData = append(encodedData, domain...)
+		encodedData += domain
 	}
 
 	// Decode base32
 	encoder := base32.StdEncoding.WithPadding(base32.NoPadding)
-	gzJSON, err := encoder.DecodeString(strings.ToUpper(string(encodedData)))
+	gzJSON, err := encoder.DecodeString(strings.ToUpper(encodedData))
 	if err != nil {
 		return nil, fmt.Errorf("failed to decode base32: %v", err)
 	}
