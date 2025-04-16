@@ -16,6 +16,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/creasty/defaults"
@@ -35,11 +36,12 @@ import (
 var version = "dev"
 
 var config struct {
-	Domains      []string `yaml:"domains"`
-	ListenPort   int      `yaml:"listen-port" default:"443"`
-	MetricsPort  int      `yaml:"metrics-port"`
-	UpstreamPort int      `yaml:"upstream-port"`
-	Paths        []string `yaml:"paths"`
+	Domains       []string `yaml:"domains"`
+	ListenPort    int      `yaml:"listen-port" default:"443"`
+	MetricsPort   int      `yaml:"metrics-port"`
+	UpstreamPort  int      `yaml:"upstream-port"`
+	Paths         []string `yaml:"paths"`
+	OriginDomains []string `yaml:"origins"`
 
 	ControlPlane string `yaml:"control-plane"`
 
@@ -55,12 +57,13 @@ var (
 )
 
 func cors(w http.ResponseWriter, r *http.Request) {
-	w.Header().Del("Access-Control-Allow-Origin")
-	w.Header().Del("Access-Control-Allow-Methods")
-	w.Header().Del("Access-Control-Allow-Headers")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if slices.Contains(config.OriginDomains, r.Host) {
+		w.Header().Set("Access-Control-Allow-Origin", "https://"+r.Host)
+	}
+
 	w.Header().Set("Access-Control-Allow-Methods", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "*")
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
 
 	if r.Method == "OPTIONS" {
 		w.WriteHeader(http.StatusOK)
@@ -176,6 +179,7 @@ func main() {
 		}
 		tlsConfig = &tls.Config{
 			GetCertificate:   certManager.GetCertificate,
+			NextProtos:       []string{"h2", "http/1.1", acme.ALPNProto},
 			MinVersion:       tls.VersionTLS13,
 			CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP384},
 		}
@@ -226,7 +230,7 @@ func main() {
 			}
 		}
 
-		// cors(w, r)
+		cors(w, r)
 
 		if len(config.Paths) > 0 {
 			allowed := false
@@ -309,6 +313,7 @@ func main() {
 		Handler:   mux,
 		TLSConfig: tlsConfig,
 	}
+
 	log.Printf("Listening on %s", listenAddr)
 	log.Fatal(httpServer.ListenAndServeTLS("", ""))
 }
