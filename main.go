@@ -55,10 +55,12 @@ var (
 )
 
 func cors(w http.ResponseWriter, r *http.Request) {
-	if slices.Contains(config.OriginDomains, r.Host) {
-		w.Header().Set("Access-Control-Allow-Origin", "https://"+r.Host)
+	origin := r.Header.Get("Origin")
+	if !slices.Contains(config.OriginDomains, origin) {
+		log.Debugf("%s not in %v", origin, config.OriginDomains)
+		origin = "*"
 	}
-
+	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Access-Control-Allow-Methods", "*")
 	w.Header().Set("Access-Control-Allow-Headers", "*")
 	w.Header().Set("Access-Control-Allow-Credentials", "true")
@@ -168,7 +170,6 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to create cert manager: %v", err)
 		}
-		log.Info("Requesting TLS certificate")
 		cert, err = certManager.RequestCert(domains)
 		if err != nil {
 			log.Fatalf("Failed to request TLS certificate: %v", err)
