@@ -55,6 +55,7 @@ func main() {
 	for domain := range domainSet {
 		if !baseDomains[domain] {
 			domains = append(domains, domain)
+			log.Printf("Domain: %s", domain)
 		}
 	}
 
