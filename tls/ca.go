@@ -41,6 +41,10 @@ type CertManager struct {
 }
 
 func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*CertManager, error) {
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create cache directory: %w", err)
+	}
+
 	user := &acmeUser{Email: email, key: privateKey}
 	config := &lego.Config{
 		CADirURL:   lego.LEDirectoryProduction,
