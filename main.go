@@ -164,7 +164,7 @@ func main() {
 	// Request TLS certificate
 	var cert *tls.Certificate
 	if domain != "localhost" {
-		certManager, err := tlsutil.NewCertManager(config.Email, privateKey)
+		certManager, err := tlsutil.NewCertManager(config.Email, config.CacheDir, privateKey)
 		if err != nil {
 			log.Fatalf("Failed to create cert manager: %v", err)
 		}
