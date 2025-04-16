@@ -5,20 +5,26 @@ import (
 	"crypto/tls"
 	"flag"
 	"fmt"
-	"log"
 	"strings"
 
+	log "github.com/sirupsen/logrus"
 	"github.com/tinfoilsh/sev-shim/dcode"
 	tlsutil "github.com/tinfoilsh/sev-shim/tls"
 )
 
 var (
-	server   = flag.String("s", "localhost:443", "Server to connect to")
+	server   = flag.String("s", "localhost", "Server to connect to")
 	insecure = flag.Bool("i", false, "Skip TLS certificate verification")
 )
 
 func main() {
 	flag.Parse()
+	if *server == "" {
+		log.Fatal("Server address is required")
+	}
+	if !strings.Contains(*server, ":") {
+		*server += ":443"
+	}
 
 	conn, err := tls.Dial("tcp", *server, &tls.Config{
 		InsecureSkipVerify: *insecure,
@@ -63,5 +69,12 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to decode attestation: %v", err)
 	}
-	fmt.Printf("Attestation: %+v\n", att)
+	log.Debugf("Attestation: %+v\n", att)
+
+	// Verify the attestation
+	measurement, err := att.Verify()
+	if err != nil {
+		log.Fatalf("Failed to verify attestation: %v", err)
+	}
+	log.Infof("Attestation verified successfully. Measurement: %s", measurement)
 }
