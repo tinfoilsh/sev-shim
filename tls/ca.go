@@ -6,6 +6,8 @@ import (
 	"crypto/tls"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-acme/lego/v4/certcrypto"
@@ -33,11 +35,12 @@ func (u *acmeUser) GetPrivateKey() crypto.PrivateKey {
 }
 
 type CertManager struct {
-	config *lego.Config
-	client *lego.Client
+	config   *lego.Config
+	client   *lego.Client
+	cacheDir string
 }
 
-func NewCertManager(email string, privateKey *ecdsa.PrivateKey) (*CertManager, error) {
+func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*CertManager, error) {
 	user := &acmeUser{Email: email, key: privateKey}
 	config := &lego.Config{
 		CADirURL:   lego.LEDirectoryProduction,
@@ -67,12 +70,25 @@ func NewCertManager(email string, privateKey *ecdsa.PrivateKey) (*CertManager, e
 	user.Registration = reg
 
 	return &CertManager{
-		config: config,
-		client: client,
+		config:   config,
+		client:   client,
+		cacheDir: cacheDir,
 	}, nil
 }
 
 func (m *CertManager) RequestCert(domains []string) (*tls.Certificate, error) {
+	certFile := filepath.Join(m.cacheDir, "cert.pem")
+	keyFile := filepath.Join(m.cacheDir, "key.pem")
+
+	if _, err := os.Stat(certFile); err == nil {
+		log.Debug("Certificate found in cache, using cached certificate")
+		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load cached certificate: %w", err)
+		}
+		return &cert, nil
+	}
+
 	log.Debugf("Requesting certificate for: %v", domains)
 	certResource, err := m.client.Certificate.Obtain(certificate.ObtainRequest{
 		Domains: domains,
@@ -80,6 +96,14 @@ func (m *CertManager) RequestCert(domains []string) (*tls.Certificate, error) {
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to obtain certificate: %w", err)
+	}
+
+	// Write to cache
+	if err := os.WriteFile(certFile, certResource.Certificate, 0644); err != nil {
+		return nil, fmt.Errorf("failed to write certificate to cache: %w", err)
+	}
+	if err := os.WriteFile(keyFile, certResource.PrivateKey, 0644); err != nil {
+		return nil, fmt.Errorf("failed to write private key to cache: %w", err)
 	}
 
 	cert, err := tls.X509KeyPair(certResource.Certificate, certResource.PrivateKey)
