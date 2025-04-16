@@ -76,5 +76,5 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to verify attestation: %v", err)
 	}
-	log.Infof("Attestation verified successfully. Measurement: %s", measurement)
+	log.Infof("Attestation verified successfully. Measurement: %+v", measurement)
 }
