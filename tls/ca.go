@@ -3,7 +3,11 @@ package tls
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"net/http"
 	"os"
@@ -35,19 +39,29 @@ func (u *acmeUser) GetPrivateKey() crypto.PrivateKey {
 }
 
 type CertManager struct {
-	config   *lego.Config
-	client   *lego.Client
-	cacheDir string
+	config         *lego.Config
+	client         *lego.Client
+	cacheDir       string
+	certSigningKey *ecdsa.PrivateKey
 }
 
 func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*CertManager, error) {
-	user := &acmeUser{Email: email, key: privateKey}
+	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create cache directory: %w", err)
+	}
+
+	acmeUserPrivateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		log.Fatalf("Failed to generate private key: %v", err)
+	}
+
+	user := &acmeUser{Email: email, key: acmeUserPrivateKey}
 	config := &lego.Config{
 		CADirURL:   lego.LEDirectoryProduction,
 		User:       user,
 		HTTPClient: http.DefaultClient,
 		Certificate: lego.CertificateConfig{
-			KeyType: certcrypto.RSA2048,
+			KeyType: certcrypto.EC384,
 			Timeout: 30 * time.Second,
 		},
 	}
@@ -70,9 +84,10 @@ func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*Cert
 	user.Registration = reg
 
 	return &CertManager{
-		config:   config,
-		client:   client,
-		cacheDir: cacheDir,
+		config:         config,
+		client:         client,
+		cacheDir:       cacheDir,
+		certSigningKey: privateKey,
 	}, nil
 }
 
@@ -81,7 +96,7 @@ func (m *CertManager) RequestCert(domains []string) (*tls.Certificate, error) {
 	keyFile := filepath.Join(m.cacheDir, "key.pem")
 
 	if _, err := os.Stat(certFile); err == nil {
-		log.Debug("Certificate found in cache, using cached certificate")
+		log.Info("Certificate found in cache, using cached certificate")
 		cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 		if err != nil {
 			return nil, fmt.Errorf("failed to load cached certificate: %w", err)
@@ -91,26 +106,46 @@ func (m *CertManager) RequestCert(domains []string) (*tls.Certificate, error) {
 
 	log.Debugf("Requesting certificate for: %v", domains)
 	certResource, err := m.client.Certificate.Obtain(certificate.ObtainRequest{
-		Domains: domains,
-		Bundle:  true,
+		Domains:    domains,
+		Bundle:     true,
+		PrivateKey: m.certSigningKey,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to obtain certificate: %w", err)
+	}
+
+	// Encode ECDSA key to PEM
+	keyBytes, err := encodeECDSAKeyToPEM(m.certSigningKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode private key: %w", err)
 	}
 
 	// Write to cache
 	if err := os.WriteFile(certFile, certResource.Certificate, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write certificate to cache: %w", err)
 	}
-	if err := os.WriteFile(keyFile, certResource.PrivateKey, 0644); err != nil {
+	if err := os.WriteFile(keyFile, keyBytes, 0644); err != nil {
 		return nil, fmt.Errorf("failed to write private key to cache: %w", err)
 	}
 
-	cert, err := tls.X509KeyPair(certResource.Certificate, certResource.PrivateKey)
+	cert, err := tls.X509KeyPair(certResource.Certificate, keyBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse certificate: %w", err)
 	}
 
 	log.Debug("Certificate obtained")
 	return &cert, nil
+}
+
+// encodeECDSAKeyToPEM encodes an ECDSA private key to PEM format
+func encodeECDSAKeyToPEM(privateKey *ecdsa.PrivateKey) ([]byte, error) {
+	x509Encoded, err := x509.MarshalECPrivateKey(privateKey)
+	if err != nil {
+		return nil, err
+	}
+	pemBlock := &pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: x509Encoded,
+	}
+	return pem.EncodeToMemory(pemBlock), nil
 }
