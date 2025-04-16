@@ -9,8 +9,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"golang.org/x/crypto/acme"
-	"golang.org/x/crypto/acme/autocert"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -18,6 +16,9 @@ import (
 	"os"
 	"slices"
 	"strings"
+
+	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
 
 	"github.com/creasty/defaults"
 	"github.com/prometheus/client_golang/prometheus"

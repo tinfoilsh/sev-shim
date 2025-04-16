@@ -3,7 +3,7 @@ package dcode
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/base64"
+	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -44,11 +44,10 @@ func Encode(att *attestation.Document, domain string) ([]string, error) {
 		return nil, fmt.Errorf("failed to compress attestation: %v", err)
 	}
 
-	// Encode the entire compressed data
-	encoded := base64.StdEncoding.EncodeToString(compressed)
-	encoded = strings.ReplaceAll(encoded, "+", "-")
-	encoded = strings.ReplaceAll(encoded, "/", "_")
-	encoded = strings.ReplaceAll(encoded, "=", "")
+	// Encode the entire compressed data using base32
+	encoder := base32.StdEncoding.WithPadding(base32.NoPadding)
+	encoded := encoder.EncodeToString(compressed)
+	encoded = strings.ToLower(encoded) // Make it lowercase for better readability in domains
 
 	// Chunk
 	domainSuffix := "." + domain
@@ -65,24 +64,17 @@ func Encode(att *attestation.Document, domain string) ([]string, error) {
 
 // Decode decodes a string of domains into an attestation document
 func Decode(domains []string) (*attestation.Document, error) {
-	var b64GzJSON []byte
+	var encodedData []byte
 	for _, domain := range domains {
 		domain = strings.Split(domain, ".")[0]
-		domain = strings.ReplaceAll(domain, "-", "+")
-		domain = strings.ReplaceAll(domain, "_", "/")
-		b64GzJSON = append(b64GzJSON, domain...)
+		encodedData = append(encodedData, domain...)
 	}
 
-	// Add padding
-	padding := len(b64GzJSON) % 4
-	if padding > 0 {
-		b64GzJSON = append(b64GzJSON, bytes.Repeat([]byte("="), 4-padding)...)
-	}
-
-	// Decode base64
-	gzJSON, err := base64.StdEncoding.DecodeString(string(b64GzJSON))
+	// Decode base32
+	encoder := base32.StdEncoding.WithPadding(base32.NoPadding)
+	gzJSON, err := encoder.DecodeString(strings.ToUpper(string(encodedData)))
 	if err != nil {
-		return nil, fmt.Errorf("failed to decode base64: %v", err)
+		return nil, fmt.Errorf("failed to decode base32: %v", err)
 	}
 
 	// Decompress
