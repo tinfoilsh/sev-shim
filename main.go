@@ -2,13 +2,15 @@ package main
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"golang.org/x/crypto/acme"
+	"golang.org/x/crypto/acme/autocert"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -16,10 +18,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/caddyserver/certmagic"
 	"github.com/creasty/defaults"
-	"github.com/google/go-sev-guest/abi"
-	"github.com/google/go-sev-guest/client"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
@@ -27,8 +26,10 @@ import (
 	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
+	"github.com/tinfoilsh/sev-shim/dcode"
 	"github.com/tinfoilsh/sev-shim/key"
 	"github.com/tinfoilsh/sev-shim/key/online"
+	tlsutil "github.com/tinfoilsh/sev-shim/tls"
 )
 
 var version = "dev"
@@ -42,7 +43,6 @@ var config struct {
 
 	ControlPlane string `yaml:"control-plane"`
 
-	StagingCA bool    `yaml:"staging-ca"`
 	RateLimit float64 `yaml:"rate-limit"`
 	RateBurst int     `yaml:"rate-burst"`
 	CacheDir  string  `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
@@ -53,30 +53,6 @@ var config struct {
 var (
 	configFile = flag.String("c", "/mnt/ramdisk/shim.yml", "Path to config file")
 )
-
-// attestationReport gets a SEV-SNP signed attestation report over a TLS certificate fingerprint
-func attestationReport(certFP string) (*attestation.Document, error) {
-	var userData [64]byte
-	copy(userData[:], certFP)
-
-	qp, err := client.GetQuoteProvider()
-	if err != nil {
-		return nil, fmt.Errorf("failed to get quote provider: %v", err)
-	}
-	report, err := qp.GetRawQuote(userData)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get quote: %v", err)
-	}
-
-	if len(report) > abi.ReportSize {
-		report = report[:abi.ReportSize]
-	}
-
-	return &attestation.Document{
-		Format: attestation.SevGuestV1,
-		Body:   base64.StdEncoding.EncodeToString(report),
-	}, nil
-}
 
 func cors(w http.ResponseWriter, r *http.Request) {
 	w.Header().Del("Access-Control-Allow-Origin")
@@ -142,23 +118,70 @@ func main() {
 	r := prometheus.NewRegistry()
 	r.MustRegister(requestsMetric)
 
+	// Generate key for TLS certificate
+	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	if err != nil {
+		log.Fatalf("Failed to generate private key: %v", err)
+	}
+
+	var domain string
+	if len(config.Domains) == 0 {
+		domain = "localhost"
+	} else if len(config.Domains) == 1 {
+		domain = config.Domains[0]
+	} else {
+		log.Fatalf("Multiple domains configured, only one is supported")
+	}
+
+	// Request SEV-SNP attestation
+	keyFP := tlsutil.KeyFP(privateKey.Public().(*ecdsa.PublicKey))
+	log.Printf("Fetching attestation over %s", keyFP)
+	var att *attestation.Document
+	if domain == "localhost" {
+		log.Warn("No domain configured, using dummy attestation report")
+		att = &attestation.Document{
+			Format: "https://tinfoil.sh/predicate/dummy/v1",
+			Body:   keyFP,
+		}
+	} else {
+		att, err = attestationReport(keyFP)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
+	// Encode attestation into domains
+	attDomains, err := dcode.Encode(att, domain)
+	if err != nil {
+		log.Fatalf("Failed to encode attestation: %v", err)
+	}
+	domains := append([]string{domain}, attDomains...)
+	for _, d := range domains {
+		log.Debugf("Domain: %s", d)
+	}
+
 	// Request TLS certificate
 	var tlsConfig *tls.Config
-	if len(config.Domains) > 0 {
-		certmagic.Default.Storage = &certmagic.FileStorage{Path: config.CacheDir}
-		certmagic.DefaultACME.Email = config.Email
-		if config.StagingCA {
-			certmagic.DefaultACME.CA = certmagic.LetsEncryptStagingCA
-		} else {
-			certmagic.DefaultACME.CA = certmagic.LetsEncryptProductionCA
+	if domain != "localhost" {
+		log.Info("Requesting TLS certificate")
+		certManager := autocert.Manager{
+			Prompt:     autocert.AcceptTOS,
+			Cache:      autocert.DirCache(config.CacheDir),
+			HostPolicy: autocert.HostWhitelist(domains...),
+			Email:      config.Email,
+			Client: &acme.Client{
+				Key:          privateKey,
+				DirectoryURL: autocert.DefaultACMEDirectory,
+			},
 		}
-		tlsConfig, err = certmagic.TLS(config.Domains)
-		if err != nil {
-			log.Fatalf("Failed to get TLS config: %v", err)
+		tlsConfig = &tls.Config{
+			GetCertificate:   certManager.GetCertificate,
+			MinVersion:       tls.VersionTLS13,
+			CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP384},
 		}
 	} else {
 		log.Warn("No domain configured, using self signed TLS certificate")
-		cert, err := tlsCertificate("localhost")
+		cert, err := tlsutil.Certificate(privateKey, domains...)
 		if err != nil {
 			log.Fatalf("Failed to generate self signed TLS certificate: %v", err)
 		}
@@ -172,29 +195,6 @@ func main() {
 	var rateLimiter *RateLimiter
 	if config.RateLimit > 0 {
 		rateLimiter = NewRateLimiter(rate.Limit(config.RateLimit), config.RateBurst)
-	}
-
-	// Request SEV-SNP attestation
-	var att any
-	if len(config.Domains) == 0 {
-		log.Warn("No domain configured, using dummy attestation report")
-		att = []byte(`DUMMY ATTESTATION`)
-	} else {
-		// Get certificate from TLS config
-		cert, err := tlsConfig.GetCertificate(&tls.ClientHelloInfo{
-			ServerName: config.Domains[0],
-		})
-		if err != nil {
-			log.Fatalf("Failed to get certificate: %v", err)
-		}
-		certFP := sha256.Sum256(cert.Leaf.Raw)
-		certFPHex := hex.EncodeToString(certFP[:])
-
-		log.Printf("Fetching attestation over %s", certFPHex)
-		att, err = attestationReport(certFPHex)
-		if err != nil {
-			log.Fatal(err)
-		}
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -242,7 +242,7 @@ func main() {
 			}
 		}
 
-		var writer http.ResponseWriter = w
+		var writer = w
 		if controlPlaneURL != nil && r.URL.Path == "/v1/chat/completions" {
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
