@@ -9,8 +9,10 @@ import (
 )
 
 type responseWriter struct {
-	Server              string
-	APIKey              string
+	Server      string
+	APIKey      string
+	InputTokens int
+
 	streamContentLength int
 	http.ResponseWriter
 }
@@ -30,6 +32,15 @@ type streamingResponse struct {
 			Content string `json:"content"`
 		} `json:"delta"`
 	} `json:"choices"`
+}
+
+type chatRequest struct {
+	Model    string `json:"model"`
+	Stream   bool   `json:"stream"`
+	Messages []struct {
+		Role    string `json:"role"`
+		Content string `json:"content"`
+	} `json:"messages"`
 }
 
 func (w *responseWriter) account(tokens int, model string) {
@@ -79,7 +90,8 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 
 			if data == "[DONE]" {
 				tokens := w.streamContentLength / 4
-				w.account(tokens, model)
+				log.Debugf("Accounting for %d input and %d output tokens", w.InputTokens, tokens)
+				w.account(w.InputTokens+tokens, model)
 				continue
 			}
 
