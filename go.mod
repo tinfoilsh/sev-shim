@@ -6,6 +6,7 @@ require (
 	github.com/creasty/defaults v1.8.0
 	github.com/go-acme/lego/v4 v4.23.1
 	github.com/google/go-sev-guest v0.12.1
+	github.com/jarcoal/httpmock v1.3.1
 	github.com/prometheus/client_golang v1.15.1
 	github.com/sirupsen/logrus v1.9.3
 	github.com/stretchr/testify v1.10.0
@@ -27,8 +28,6 @@ require (
 	github.com/google/go-containerregistry v0.20.2 // indirect
 	github.com/google/logger v1.1.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
-	github.com/jarcoal/httpmock v1.3.1 // indirect
-	github.com/klauspost/cpuid/v2 v2.2.9 // indirect
 	github.com/kr/text v0.2.0 // indirect
 	github.com/letsencrypt/boulder v0.0.0-20240620165639-de9c06129bec // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.4 // indirect
