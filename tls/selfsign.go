@@ -1,9 +1,7 @@
-package main
+package tls
 
 import (
-	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
@@ -14,41 +12,26 @@ import (
 	"time"
 )
 
-func certificate(cn string) (crypto.Signer, []byte, error) {
-	priv, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
-	if err != nil {
-		return nil, nil, fmt.Errorf("generating key: %w", err)
-	}
-
+// Certificate creates a self-signed certificate for the given domain
+func Certificate(key *ecdsa.PrivateKey, domains ...string) (*tls.Certificate, error) {
 	template := &x509.Certificate{
-		SerialNumber: big.NewInt(1),
-		Subject: pkix.Name{
-			CommonName: cn,
-		},
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{},
 		NotBefore:             time.Now(),
 		NotAfter:              time.Now().Add(time.Hour),
 		KeyUsage:              x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
+		DNSNames:              domains,
 	}
-
-	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &priv.PublicKey, priv)
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
 	if err != nil {
-		return nil, nil, fmt.Errorf("creating certificate: %w", err)
-	}
-
-	return priv, certDER, err
-}
-
-func tlsCertificate(domain string) (*tls.Certificate, error) {
-	priv, certDER, err := certificate(domain)
-	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("creating certificate: %w", err)
 	}
 
 	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
 
-	pk, err := x509.MarshalPKCS8PrivateKey(priv)
+	pk, err := x509.MarshalPKCS8PrivateKey(key)
 	if err != nil {
 		return nil, fmt.Errorf("marshaling private key: %w", err)
 	}
