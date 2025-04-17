@@ -222,6 +222,9 @@ func main() {
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		cors(w, r)
+		if r.Method == "OPTIONS" {
+			return
+		}
 
 		requestsMetric.WithLabelValues().Inc()
 
