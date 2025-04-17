@@ -76,12 +76,18 @@ func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*Cert
 		return nil, fmt.Errorf("failed to set TLS-ALPN-01 provider: %w", err)
 	}
 
-	log.Debug("Registering ACME account")
-	reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
-	if err != nil {
-		return nil, fmt.Errorf("failed to register account: %w", err)
+	// Only register if certificate doesn't exist in cache
+	certFile := filepath.Join(cacheDir, "cert.pem")
+	if _, err := os.Stat(certFile); os.IsNotExist(err) {
+		log.Debug("Registering ACME account")
+		reg, err := client.Registration.Register(registration.RegisterOptions{TermsOfServiceAgreed: true})
+		if err != nil {
+			return nil, fmt.Errorf("failed to register account: %w", err)
+		}
+		user.Registration = reg
+	} else {
+		log.Debug("Certificate exists in cache, skipping ACME registration")
 	}
-	user.Registration = reg
 
 	return &CertManager{
 		config:         config,

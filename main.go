@@ -52,23 +52,43 @@ var config struct {
 
 var (
 	configFile = flag.String("c", "/mnt/ramdisk/shim.yml", "Path to config file")
+	dev        = flag.Bool("d", false, "Skip dcode domains, use dummy attestation, and enable verbose logging")
 )
 
 func cors(w http.ResponseWriter, r *http.Request) {
-	origin := r.Header.Get("Origin")
-	if !slices.Contains(config.OriginDomains, origin) {
-		log.Debugf("%s not in %v", origin, config.OriginDomains)
-		origin = "*"
-	}
-	w.Header().Set("Access-Control-Allow-Origin", origin)
-	w.Header().Set("Access-Control-Allow-Methods", "*")
-	w.Header().Set("Access-Control-Allow-Headers", "*")
-	w.Header().Set("Access-Control-Allow-Credentials", "true")
+	log.Debugf("CORS request: %s", r.Header.Get("Origin"))
 
-	if r.Method == "OPTIONS" {
-		w.WriteHeader(http.StatusOK)
+	origin := r.Header.Get("Origin")
+	if origin == "" {
+		return // same‑origin request
+	}
+
+	// Allow only configured origins
+	if !slices.Contains(config.OriginDomains, origin) {
+		log.Debugf("CORS origin not allowed: %s", origin)
+		http.Error(w, "CORS origin not allowed", http.StatusForbidden)
 		return
 	}
+
+	w.Header().Set("Access-Control-Allow-Origin", origin)
+	w.Header().Set("Vary", "Origin") // cache
+	w.Header().Set("Access-Control-Allow-Credentials", "true")
+	w.Header().Set("Access-Control-Allow-Methods", "GET,POST,OPTIONS")
+
+	// Echo requested headers or use a safe default
+	reqHdr := r.Header.Get("Access-Control-Request-Headers")
+	if reqHdr == "" {
+		reqHdr = "Authorization,Content-Type"
+	}
+	w.Header().Set("Access-Control-Allow-Headers", reqHdr)
+
+	if r.Method == http.MethodOptions {
+		log.Debugf("CORS OPTIONS request: %s", origin)
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	log.Debugf("CORS request allowed: %s", origin)
 }
 
 func main() {
@@ -85,7 +105,11 @@ func main() {
 		log.Fatalf("Failed to set defaults: %v", err)
 	}
 
-	if config.Verbose {
+	if config.UpstreamPort == 0 {
+		log.Fatalf("Upstream port is not set")
+	}
+
+	if config.Verbose || *dev {
 		log.SetLevel(log.DebugLevel)
 	}
 
@@ -140,8 +164,8 @@ func main() {
 	keyFP := tlsutil.KeyFP(privateKey.Public().(*ecdsa.PublicKey))
 	log.Printf("Fetching attestation over %s", keyFP)
 	var att *attestation.Document
-	if domain == "localhost" {
-		log.Warn("No domain configured, using dummy attestation report")
+	if domain == "localhost" || *dev {
+		log.Warn("Using dummy attestation report")
 		att = &attestation.Document{
 			Format: "https://tinfoil.sh/predicate/dummy/v1",
 			Body:   keyFP,
@@ -158,7 +182,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to encode attestation: %v", err)
 	}
-	domains := append([]string{domain}, attDomains...)
+	domains := []string{domain}
+	if !*dev {
+		domains = append(domains, attDomains...)
+	}
 	for _, d := range domains {
 		log.Debugf("Domain: %s", d)
 	}
@@ -278,6 +305,10 @@ func main() {
 				req.Header.Set("Host", "localhost")
 				req.Host = "localhost"
 				log.Debugf("Proxying request to %+v", req.URL.String())
+			},
+			ModifyResponse: func(res *http.Response) error {
+				res.Header.Del("Access-Control-Allow-Origin")
+				return nil
 			},
 		}
 
