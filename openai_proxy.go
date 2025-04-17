@@ -4,24 +4,15 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-
-	log "github.com/sirupsen/logrus"
 )
 
 type responseWriter struct {
-	Server      string
-	APIKey      string
-	InputTokens int
+	Model  string
+	APIKey string
+	Tokens int
 
-	streamContentLength int
+	tokenRecorder *TokenRecorder
 	http.ResponseWriter
-}
-
-type oneShotResponse struct {
-	Model string `json:"model"`
-	Usage struct {
-		TotalTokens int `json:"total_tokens"`
-	} `json:"usage"`
 }
 
 type streamingResponse struct {
@@ -43,84 +34,43 @@ type chatRequest struct {
 	} `json:"messages"`
 }
 
-func (w *responseWriter) account(tokens int, model string) {
-	var b struct {
-		APIKey string `json:"api_key"`
-		Tokens int    `json:"tokens"`
-		Model  string `json:"model"`
-	}
-	b.APIKey = w.APIKey
-	b.Tokens = tokens
-	b.Model = model
-
-	body, err := json.Marshal(b)
-	if err != nil {
-		log.Warnf("Failed to marshal response: %v", err)
-		return
-	}
-
-	resp, err := http.Post(w.Server, "application/json", strings.NewReader(string(body)))
-	if err != nil {
-		log.Warnf("Failed to post response: %v", err)
-		return
-	}
-	if resp.StatusCode != http.StatusOK {
-		log.Warnf("Failed to post response: %v", resp.Status)
-		return
-	}
-}
-
 func (w *responseWriter) Write(b []byte) (int, error) {
-	n, err := w.ResponseWriter.Write(b)
-
-	isStream := strings.Contains(w.Header().Get("Content-Type"), "text/event-stream")
-	if isStream {
-		var model string
+	// Check content type to determine how to handle the response
+	contentType := w.Header().Get("Content-Type")
+	if strings.Contains(contentType, "application/json") { // Handle non-streaming JSON responses
+		var response struct {
+			Model string `json:"model"`
+			Usage struct {
+				PromptTokens     int `json:"prompt_tokens"`
+				CompletionTokens int `json:"completion_tokens"`
+				TotalTokens      int `json:"total_tokens"`
+			} `json:"usage"`
+		}
+		if err := json.Unmarshal(b, &response); err == nil {
+			w.Tokens += response.Usage.CompletionTokens
+			w.tokenRecorder.Record(w.APIKey, w.Model, w.Tokens)
+		}
+	} else if strings.Contains(contentType, "text/event-stream") { // Handle streaming responses
 		lines := strings.Split(string(b), "\n")
 		for _, line := range lines {
-			line = strings.TrimSpace(line)
-			if !strings.HasPrefix(line, "data: ") {
-				continue
-			}
+			if strings.HasPrefix(line, "data: ") && line != "data: [DONE]" {
+				data := strings.TrimPrefix(line, "data: ")
+				var stream streamingResponse
+				if err := json.Unmarshal([]byte(data), &stream); err == nil {
+					chunkTextLength := 0
+					for _, choice := range stream.Choices {
+						chunkTextLength += len(choice.Delta.Content)
+					}
 
-			data := strings.TrimPrefix(line, "data: ")
-			if strings.TrimSpace(data) == "" {
-				continue
-			}
-
-			if data == "[DONE]" {
-				tokens := w.streamContentLength / 4
-				log.Debugf("Accounting for %d input and %d output tokens", w.InputTokens, tokens)
-				w.account(w.InputTokens+tokens, model)
-				continue
-			}
-
-			var resp streamingResponse
-			if err := json.Unmarshal([]byte(data), &resp); err != nil {
-				log.Warnf("Failed to unmarshal streaming response for data '%s': %v", data, err)
-				continue
-			}
-			if resp.Model != "" {
-				model = resp.Model
-			}
-
-			if len(resp.Choices) > 0 {
-				choice := resp.Choices[0]
-				if choice.Delta.Content != "" {
-					w.streamContentLength += len(choice.Delta.Content)
+					w.Tokens += max(chunkTextLength/4, 1)
 				}
+			} else if line == "data: [DONE]" {
+				w.tokenRecorder.Record(w.APIKey, w.Model, w.Tokens)
 			}
-		}
-	} else {
-		var resp oneShotResponse
-		if err := json.Unmarshal(b, &resp); err != nil {
-			log.Warnf("Failed to unmarshal response: %v", err)
-		} else {
-			w.account(resp.Usage.TotalTokens, resp.Model)
 		}
 	}
 
-	return n, err
+	return w.ResponseWriter.Write(b)
 }
 
 func (w *responseWriter) WriteHeader(statusCode int) {
@@ -129,4 +79,10 @@ func (w *responseWriter) WriteHeader(statusCode int) {
 
 func (w *responseWriter) Header() http.Header {
 	return w.ResponseWriter.Header()
+}
+
+func (w *responseWriter) Flush() {
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }
