@@ -115,6 +115,7 @@ func main() {
 
 	var validator key.Validator
 	var controlPlaneURL *url.URL
+	var shimCollectURL string
 
 	if config.ControlPlane != "" {
 		controlPlaneURL, err = url.Parse(config.ControlPlane)
@@ -126,10 +127,15 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to initialize online API key verifier: %v", err)
 		}
+
+		shimCollectURL = controlPlaneURL.JoinPath("api", "shim", "collect").String()
 	} else {
 		validator = nil
 		log.Warn("API key verification disabled")
 	}
+
+	tokenRecorder := NewTokenRecorder(shimCollectURL)
+	tokenRecorder.Start()
 
 	mux := http.NewServeMux()
 
@@ -217,9 +223,6 @@ func main() {
 	if config.RateLimit > 0 {
 		rateLimiter = NewRateLimiter(rate.Limit(config.RateLimit), config.RateBurst)
 	}
-
-	tokenRecorder := NewTokenRecorder(controlPlaneURL.JoinPath("api", "shim", "collect").String())
-	tokenRecorder.Start()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		cors(w, r)
