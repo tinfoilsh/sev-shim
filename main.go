@@ -56,8 +56,6 @@ var (
 )
 
 func cors(w http.ResponseWriter, r *http.Request) {
-	log.Debugf("CORS request: %s", r.Header.Get("Origin"))
-
 	origin := r.Header.Get("Origin")
 	if origin == "" {
 		return // same‑origin request
@@ -88,7 +86,7 @@ func cors(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Debugf("CORS request allowed: %s", origin)
+	log.Tracef("CORS request allowed: %s", origin)
 }
 
 func main() {
@@ -220,6 +218,9 @@ func main() {
 		rateLimiter = NewRateLimiter(rate.Limit(config.RateLimit), config.RateBurst)
 	}
 
+	tokenRecorder := NewTokenRecorder(controlPlaneURL.JoinPath("api", "shim", "collect").String())
+	tokenRecorder.Start()
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		cors(w, r)
 		if r.Method == "OPTIONS" {
@@ -288,14 +289,13 @@ func main() {
 			var inputTokens int
 			for _, message := range chatRequest.Messages {
 				inputTokens += len(message.Content) / 4
-				log.Debugf("Input tokens: %d", inputTokens)
 			}
-
 			writer = &responseWriter{
-				InputTokens:    inputTokens,
-				Server:         controlPlaneURL.JoinPath("api", "shim", "collect").String(),
+				Tokens:         inputTokens, // Start with the input tokens
 				ResponseWriter: w,
 				APIKey:         apiKey,
+				Model:          chatRequest.Model,
+				tokenRecorder:  tokenRecorder,
 			}
 
 			r.Body = io.NopCloser(bytes.NewReader(body))
