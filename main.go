@@ -194,6 +194,8 @@ func main() {
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		cors(w, r)
+
 		requestsMetric.WithLabelValues().Inc()
 
 		apiKey := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
@@ -221,8 +223,6 @@ func main() {
 				return
 			}
 		}
-
-		cors(w, r)
 
 		if len(config.Paths) > 0 {
 			allowed := false
