@@ -62,7 +62,7 @@ func cors(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Allow only configured origins
-	if !slices.Contains(config.OriginDomains, origin) {
+	if len(config.OriginDomains) > 0 && !slices.Contains(config.OriginDomains, origin) {
 		log.Debugf("CORS origin not allowed: %s", origin)
 		http.Error(w, "CORS origin not allowed", http.StatusForbidden)
 		return
@@ -218,8 +218,11 @@ func main() {
 		rateLimiter = NewRateLimiter(rate.Limit(config.RateLimit), config.RateBurst)
 	}
 
-	tokenRecorder := NewTokenRecorder(controlPlaneURL.JoinPath("api", "shim", "collect").String())
-	tokenRecorder.Start()
+	var tokenRecorder *TokenRecorder
+	if controlPlaneURL != nil {
+		log.Printf("Starting token recorder")
+		tokenRecorder = NewTokenRecorder(controlPlaneURL.JoinPath("api", "shim", "collect").String())
+		tokenRecorder.Start()
 	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
