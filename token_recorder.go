@@ -17,16 +17,16 @@ type tokenRequest struct {
 }
 
 type TokenRecorder struct {
-	server string
-	queue  []tokenRequest
-	mutex  sync.Mutex
-	ticker *time.Ticker
+	shimCollectURL string
+	queue          []tokenRequest
+	mutex          sync.Mutex
+	ticker         *time.Ticker
 }
 
-func NewTokenRecorder(server string) *TokenRecorder {
+func NewTokenRecorder(shimCollectURL string) *TokenRecorder {
 	return &TokenRecorder{
-		server: server,
-		queue:  make([]tokenRequest, 0),
+		shimCollectURL: shimCollectURL,
+		queue:          make([]tokenRequest, 0),
 	}
 }
 
@@ -72,6 +72,10 @@ func (r *TokenRecorder) Stop() {
 }
 
 func (r *TokenRecorder) account(m tokenRequest) {
+	if r.shimCollectURL == "" {
+		return
+	}
+
 	log.Debugf("Accounting for %d tokens for %s", m.Tokens, m.Model)
 	body, err := json.Marshal(m)
 	if err != nil {
@@ -79,8 +83,8 @@ func (r *TokenRecorder) account(m tokenRequest) {
 		return
 	}
 
-	log.Debugf("Sending %d tokens to %s", m.Tokens, r.server)
-	resp, err := http.Post(r.server, "application/json", strings.NewReader(string(body)))
+	log.Debugf("Sending %d tokens to %s", m.Tokens, r.shimCollectURL)
+	resp, err := http.Post(r.shimCollectURL, "application/json", strings.NewReader(string(body)))
 	if err != nil {
 		log.Warnf("Failed to post response: %v", err)
 		return

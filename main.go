@@ -115,6 +115,7 @@ func main() {
 
 	var validator key.Validator
 	var controlPlaneURL *url.URL
+	var shimCollectURL string
 
 	if config.ControlPlane != "" {
 		controlPlaneURL, err = url.Parse(config.ControlPlane)
@@ -126,6 +127,8 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to initialize online API key verifier: %v", err)
 		}
+
+		shimCollectURL = controlPlaneURL.JoinPath("api", "shim", "collect").String()
 	} else {
 		validator = nil
 		log.Warn("API key verification disabled")
