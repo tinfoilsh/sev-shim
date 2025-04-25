@@ -48,7 +48,9 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 		}
 		if err := json.Unmarshal(b, &response); err == nil {
 			w.Tokens += response.Usage.CompletionTokens
-			w.tokenRecorder.Record(w.APIKey, w.Model, w.Tokens)
+			if w.tokenRecorder != nil {
+				w.tokenRecorder.Record(w.APIKey, w.Model, w.Tokens)
+			}
 		}
 	} else if strings.Contains(contentType, "text/event-stream") { // Handle streaming responses
 		lines := strings.Split(string(b), "\n")
@@ -65,7 +67,9 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 					w.Tokens += max(chunkTextLength/4, 1)
 				}
 			} else if line == "data: [DONE]" {
-				w.tokenRecorder.Record(w.APIKey, w.Model, w.Tokens)
+				if w.tokenRecorder != nil {
+					w.tokenRecorder.Record(w.APIKey, w.Model, w.Tokens)
+				}
 			}
 		}
 	}

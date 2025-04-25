@@ -220,6 +220,7 @@ func main() {
 
 	tokenRecorder := NewTokenRecorder(controlPlaneURL.JoinPath("api", "shim", "collect").String())
 	tokenRecorder.Start()
+	}
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		cors(w, r)
