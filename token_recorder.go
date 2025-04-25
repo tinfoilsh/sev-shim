@@ -72,10 +72,6 @@ func (r *TokenRecorder) Stop() {
 }
 
 func (r *TokenRecorder) account(m tokenRequest) {
-	if r.shimCollectURL == "" {
-		return
-	}
-
 	log.Debugf("Accounting for %d tokens for %s", m.Tokens, m.Model)
 	body, err := json.Marshal(m)
 	if err != nil {
