@@ -30,8 +30,16 @@ type chatRequest struct {
 	Stream   bool   `json:"stream"`
 	Messages []struct {
 		Role    string `json:"role"`
-		Content string `json:"content"`
+		Content any    `json:"content"` // String or array of content parts
 	} `json:"messages"`
+}
+
+type contentPart struct {
+	Type     string `json:"type"`
+	Text     string `json:"text,omitempty"`
+	ImageURL struct {
+		URL string `json:"url"`
+	} `json:"image_url,omitempty"`
 }
 
 func (w *responseWriter) Write(b []byte) (int, error) {
