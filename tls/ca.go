@@ -52,7 +52,7 @@ func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*Cert
 
 	acmeUserPrivateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
 	if err != nil {
-		log.Fatalf("Failed to generate private key: %v", err)
+		return nil, fmt.Errorf("Failed to generate private key: %v", err)
 	}
 
 	user := &acmeUser{Email: email, key: acmeUserPrivateKey}
