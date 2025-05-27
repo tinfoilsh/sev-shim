@@ -64,7 +64,7 @@ func cors(w http.ResponseWriter, r *http.Request) {
 	// Allow only configured origins
 	if len(config.OriginDomains) > 0 && !slices.Contains(config.OriginDomains, origin) {
 		log.Debugf("CORS origin not allowed: %s", origin)
-		http.Error(w, "CORS origin not allowed", http.StatusForbidden)
+		http.Error(w, "shim: 403 CORS origin not allowed", http.StatusForbidden)
 		return
 	}
 
@@ -236,25 +236,25 @@ func main() {
 		apiKey := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if validator != nil && r.URL.Path == "/v1/chat/completions" {
 			if len(apiKey) == 0 {
-				http.Error(w, key.ErrAPIKeyRequired.Error(), http.StatusUnauthorized)
+				http.Error(w, "shim: 401 API key required", http.StatusUnauthorized)
 				return
 			}
 
 			if err := validator.Validate(apiKey); err != nil {
 				log.Warnf("Failed to validate API key: %v", err)
-				http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+				http.Error(w, "shim: 401 invalid API key", http.StatusUnauthorized)
 				return
 			}
 		}
 
 		if rateLimiter != nil {
 			if apiKey == "" {
-				http.Error(w, key.ErrAPIKeyRequired.Error(), http.StatusUnauthorized)
+				http.Error(w, "shim: 401 API key required", http.StatusUnauthorized)
 				return
 			}
 			limiter := rateLimiter.Limit(apiKey)
 			if !limiter.Allow() {
-				http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)
+				http.Error(w, "shim: 429 rate limit exceeded", http.StatusTooManyRequests)
 				return
 			}
 		}
@@ -268,7 +268,7 @@ func main() {
 				}
 			}
 			if !allowed {
-				http.Error(w, "shim: 403", http.StatusForbidden)
+				http.Error(w, "shim: 403 path not allowed", http.StatusForbidden)
 				return
 			}
 		}
@@ -278,7 +278,7 @@ func main() {
 			body, err := io.ReadAll(r.Body)
 			if err != nil {
 				log.Warnf("Failed to read request body: %v", err)
-				http.Error(w, "shim: 400", http.StatusBadRequest)
+				http.Error(w, "shim: 400 reading request body", http.StatusBadRequest)
 				return
 			}
 			r.Body.Close()
@@ -286,13 +286,22 @@ func main() {
 			var chatRequest chatRequest
 			if err := json.Unmarshal(body, &chatRequest); err != nil {
 				log.Warnf("Failed to decode chat request: %v", err)
-				http.Error(w, "shim: 400", http.StatusBadRequest)
+				http.Error(w, "shim: 400 decoding chat request", http.StatusBadRequest)
 				return
 			}
 
 			var inputTokens int
 			for _, message := range chatRequest.Messages {
-				inputTokens += len(message.Content) / 4
+				switch content := message.Content.(type) {
+				case string:
+					inputTokens += len(content) / 4
+				case []contentPart:
+					for _, part := range content {
+						if part.Type == "text" {
+							inputTokens += len(part.Text) / 4
+						}
+					}
+				}
 			}
 			writer = &responseWriter{
 				Tokens:         inputTokens, // Start with the input tokens
