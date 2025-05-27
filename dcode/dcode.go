@@ -3,13 +3,13 @@ package dcode
 import (
 	"bytes"
 	"compress/gzip"
-	"encoding/base32"
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"sort"
 	"strings"
+
+	"github.com/martinlindhe/base36"
 
 	"github.com/tinfoilsh/verifier/attestation"
 )
@@ -21,7 +21,7 @@ func gzCompress(data []byte) ([]byte, error) {
 		return nil, fmt.Errorf("failed to write data: %v", err)
 	}
 	if err := gz.Close(); err != nil {
-		log.Fatal(err)
+		return nil, fmt.Errorf("closing reader: %v", err)
 	}
 	return b.Bytes(), nil
 }
@@ -45,9 +45,8 @@ func Encode(att *attestation.Document, domain string) ([]string, error) {
 		return nil, fmt.Errorf("failed to compress attestation: %v", err)
 	}
 
-	// Encode the entire compressed data using base32
-	encoder := base32.StdEncoding.WithPadding(base32.NoPadding)
-	encoded := encoder.EncodeToString(compressed)
+	// Encode the entire compressed data using base36
+	encoded := base36.EncodeBytes(compressed)
 	encoded = strings.ToLower(encoded) // Make it lowercase for better readability in domains
 
 	// Chunk
@@ -79,15 +78,11 @@ func Decode(domains []string) (*attestation.Document, error) {
 		encodedData += domain[2:]
 	}
 
-	// Decode base32
-	encoder := base32.StdEncoding.WithPadding(base32.NoPadding)
-	gzJSON, err := encoder.DecodeString(strings.ToUpper(encodedData))
-	if err != nil {
-		return nil, fmt.Errorf("failed to decode base32: %v", err)
-	}
+	// Decode base36
+	compressed := base36.DecodeToBytes(strings.ToUpper(encodedData))
 
 	// Decompress
-	attJSON, err := gzDecompress(gzJSON)
+	attJSON, err := gzDecompress(compressed)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decompress attestation: %v", err)
 	}
