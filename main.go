@@ -89,6 +89,23 @@ func cors(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("CORS request allowed: %s", origin)
 }
 
+func tokenizeAudioResponse(resp *http.Response) (int, error) {
+	reqBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read request body: %w", err)
+	}
+	resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(reqBody))
+
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(reqBody, &body); err != nil {
+		return 0, fmt.Errorf("failed to unmarshal request body: %w", err)
+	}
+	return len(body.Text) / 4, nil
+}
+
 func main() {
 	flag.Parse()
 
@@ -324,6 +341,20 @@ func main() {
 			},
 			ModifyResponse: func(res *http.Response) error {
 				res.Header.Del("Access-Control-Allow-Origin")
+
+				if tokenRecorder != nil && res.Request != nil && res.Request.URL.Path == "/v1/audio/transcriptions" {
+					tokenCount, err := tokenizeAudioResponse(res)
+					if err != nil {
+						log.Warnf("Failed to tokenize audio response: %v", err)
+						return err
+					}
+
+					apiKey := strings.TrimPrefix(res.Request.Header.Get("Authorization"), "Bearer ")
+					tokenRecorder.Record(apiKey, "whisper", tokenCount)
+
+					log.Debugf("Transcribed %d tokens for %s", tokenCount, apiKey)
+				}
+
 				return nil
 			},
 		}
