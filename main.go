@@ -43,11 +43,12 @@ var config struct {
 
 	ControlPlane string `yaml:"control-plane"`
 
-	RateLimit float64 `yaml:"rate-limit"`
-	RateBurst int     `yaml:"rate-burst"`
-	CacheDir  string  `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
-	Email     string  `yaml:"email" default:"tls@tinfoil.sh"`
-	Verbose   bool    `yaml:"verbose"`
+	RateLimit            float64 `yaml:"rate-limit"`
+	RateBurst            int     `yaml:"rate-burst"`
+	CacheDir             string  `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
+	Email                string  `yaml:"email" default:"tls@tinfoil.sh"`
+	NoPublishAttestation bool    `yaml:"no-publish-attestation"`
+	Verbose              bool    `yaml:"verbose"`
 }
 
 var (
@@ -198,7 +199,7 @@ func main() {
 		log.Fatalf("Failed to encode attestation: %v", err)
 	}
 	domains := []string{domain}
-	if !*dev {
+	if !*dev && !config.NoPublishAttestation {
 		domains = append(domains, attDomains...)
 	}
 	for _, d := range domains {
