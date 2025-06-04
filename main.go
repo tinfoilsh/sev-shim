@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/creasty/defaults"
+	"github.com/go-acme/lego/v4/lego"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
@@ -40,6 +41,7 @@ var config struct {
 	UpstreamPort  int      `yaml:"upstream-port"`
 	Paths         []string `yaml:"paths"`
 	OriginDomains []string `yaml:"origins"`
+	TLS           string   `yaml:"tls"`
 
 	ControlPlane string `yaml:"control-plane"`
 
@@ -205,8 +207,13 @@ func main() {
 
 	// Request TLS certificate
 	var cert *tls.Certificate
-	if config.Domain != "localhost" {
-		certManager, err := tlsutil.NewCertManager(config.Email, config.CacheDir, privateKey)
+	if config.Domain != "localhost" && config.TLS != "self-signed" {
+		dir := lego.LEDirectoryProduction
+		if config.TLS == "staging" {
+			dir = lego.LEDirectoryStaging
+		}
+
+		certManager, err := tlsutil.NewCertManager(config.Email, config.CacheDir, dir, config.ListenPort, privateKey)
 		if err != nil {
 			log.Fatalf("Failed to create cert manager: %v", err)
 		}

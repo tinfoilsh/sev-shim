@@ -45,7 +45,7 @@ type CertManager struct {
 	certSigningKey *ecdsa.PrivateKey
 }
 
-func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*CertManager, error) {
+func NewCertManager(email, cacheDir, dir string, port int, privateKey *ecdsa.PrivateKey) (*CertManager, error) {
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
@@ -57,7 +57,7 @@ func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*Cert
 
 	user := &acmeUser{Email: email, key: acmeUserPrivateKey}
 	config := &lego.Config{
-		CADirURL:   lego.LEDirectoryProduction,
+		CADirURL:   dir,
 		User:       user,
 		HTTPClient: http.DefaultClient,
 		Certificate: lego.CertificateConfig{
@@ -71,7 +71,7 @@ func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*Cert
 	}
 
 	if err := client.Challenge.SetTLSALPN01Provider(
-		tlsalpn01.NewProviderServer("", "443"),
+		tlsalpn01.NewProviderServer("", fmt.Sprintf("%d", port)),
 	); err != nil {
 		return nil, fmt.Errorf("failed to set TLS-ALPN-01 provider: %w", err)
 	}
