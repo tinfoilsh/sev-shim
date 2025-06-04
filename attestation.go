@@ -45,6 +45,11 @@ func tdxAttestationReport(certFP string) (*attestation.Document, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quote provider: %v", err)
 	}
+
+	if err := qp.IsSupported(); err != nil {
+		return nil, fmt.Errorf("TDX is not supported: %v", err)
+	}
+
 	report, err := qp.GetRawQuote(userData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get quote: %v", err)
