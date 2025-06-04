@@ -34,7 +34,7 @@ import (
 var version = "dev"
 
 var config struct {
-	Domains       []string `yaml:"domains"`
+	Domain        string   `yaml:"domain"`
 	ListenPort    int      `yaml:"listen-port" default:"443"`
 	MetricsPort   int      `yaml:"metrics-port"`
 	UpstreamPort  int      `yaml:"upstream-port"`
@@ -43,12 +43,12 @@ var config struct {
 
 	ControlPlane string `yaml:"control-plane"`
 
-	RateLimit            float64 `yaml:"rate-limit"`
-	RateBurst            int     `yaml:"rate-burst"`
-	CacheDir             string  `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
-	Email                string  `yaml:"email" default:"tls@tinfoil.sh"`
-	NoPublishAttestation bool    `yaml:"no-publish-attestation"`
-	Verbose              bool    `yaml:"verbose"`
+	RateLimit          float64 `yaml:"rate-limit"`
+	RateBurst          int     `yaml:"rate-burst"`
+	CacheDir           string  `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
+	Email              string  `yaml:"email" default:"tls@tinfoil.sh"`
+	PublishAttestation bool    `yaml:"publish-attestation"`
+	Verbose            bool    `yaml:"verbose"`
 }
 
 var (
@@ -167,20 +167,15 @@ func main() {
 		log.Fatalf("Failed to generate private key: %v", err)
 	}
 
-	var domain string
-	if len(config.Domains) == 0 {
-		domain = "localhost"
-	} else if len(config.Domains) == 1 {
-		domain = config.Domains[0]
-	} else {
-		log.Fatalf("Multiple domains configured, only one is supported")
+	if config.Domain == "" {
+		config.Domain = "localhost"
 	}
 
 	// Request SEV-SNP attestation
 	keyFP := tlsutil.KeyFP(privateKey.Public().(*ecdsa.PublicKey))
 	log.Printf("Fetching attestation over %s", keyFP)
 	var att *attestation.Document
-	if domain == "localhost" || *dev {
+	if config.Domain == "localhost" || *dev {
 		log.Warn("Using dummy attestation report")
 		att = &attestation.Document{
 			Format: "https://tinfoil.sh/predicate/dummy/v1",
@@ -193,22 +188,24 @@ func main() {
 		}
 	}
 
+	domains := []string{config.Domain}
+
 	// Encode attestation into domains
-	attDomains, err := dcode.Encode(att, domain)
-	if err != nil {
-		log.Fatalf("Failed to encode attestation: %v", err)
-	}
-	domains := []string{domain}
-	if !*dev && !config.NoPublishAttestation {
+	if config.PublishAttestation {
+		attDomains, err := dcode.Encode(att, config.Domain)
+		if err != nil {
+			log.Fatalf("Failed to encode attestation: %v", err)
+		}
 		domains = append(domains, attDomains...)
 	}
+
 	for _, d := range domains {
 		log.Debugf("Domain: %s", d)
 	}
 
 	// Request TLS certificate
 	var cert *tls.Certificate
-	if domain != "localhost" {
+	if config.Domain != "localhost" {
 		certManager, err := tlsutil.NewCertManager(config.Email, config.CacheDir, privateKey)
 		if err != nil {
 			log.Fatalf("Failed to create cert manager: %v", err)
