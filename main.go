@@ -93,23 +93,6 @@ func cors(w http.ResponseWriter, r *http.Request) {
 	log.Tracef("CORS request allowed: %s", origin)
 }
 
-func tokenizeAudioResponse(resp *http.Response) (int, error) {
-	reqBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return 0, fmt.Errorf("failed to read request body: %w", err)
-	}
-	resp.Body.Close()
-	resp.Body = io.NopCloser(bytes.NewReader(reqBody))
-
-	var body struct {
-		Text string `json:"text"`
-	}
-	if err := json.Unmarshal(reqBody, &body); err != nil {
-		return 0, fmt.Errorf("failed to unmarshal request body: %w", err)
-	}
-	return len(body.Text) / 4, nil
-}
-
 func main() {
 	flag.Parse()
 
@@ -306,15 +289,15 @@ func main() {
 			}
 			r.Body.Close()
 
-			var chatRequest chatRequest
-			if err := json.Unmarshal(body, &chatRequest); err != nil {
+			var cr chatRequest
+			if err := json.Unmarshal(body, &cr); err != nil {
 				log.Warnf("Failed to decode chat request: %v", err)
 				http.Error(w, "shim: 400 decoding chat request", http.StatusBadRequest)
 				return
 			}
 
 			var inputTokens int
-			for _, message := range chatRequest.Messages {
+			for _, message := range cr.Messages {
 				switch content := message.Content.(type) {
 				case string:
 					inputTokens += len(content) / 4
@@ -330,7 +313,7 @@ func main() {
 				Tokens:         inputTokens, // Start with the input tokens
 				ResponseWriter: w,
 				APIKey:         apiKey,
-				Model:          chatRequest.Model,
+				Model:          cr.Model,
 				tokenRecorder:  tokenRecorder,
 			}
 
