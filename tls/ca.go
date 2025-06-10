@@ -18,6 +18,7 @@ import (
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/challenge/tlsalpn01"
 	"github.com/go-acme/lego/v4/lego"
+	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
 	"github.com/go-acme/lego/v4/registration"
 	log "github.com/sirupsen/logrus"
 )
@@ -38,6 +39,11 @@ func (u *acmeUser) GetPrivateKey() crypto.PrivateKey {
 	return u.key
 }
 
+var (
+	ChallengeModeTLSALPN01 = "tlsalpn01"
+	ChallengeModeDNS01     = "dns01"
+)
+
 type CertManager struct {
 	config         *lego.Config
 	client         *lego.Client
@@ -45,7 +51,7 @@ type CertManager struct {
 	certSigningKey *ecdsa.PrivateKey
 }
 
-func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*CertManager, error) {
+func NewCertManager(email, cacheDir, challengeMode string, privateKey *ecdsa.PrivateKey) (*CertManager, error) {
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
@@ -70,10 +76,23 @@ func NewCertManager(email, cacheDir string, privateKey *ecdsa.PrivateKey) (*Cert
 		return nil, fmt.Errorf("failed to create lego client: %w", err)
 	}
 
-	if err := client.Challenge.SetTLSALPN01Provider(
-		tlsalpn01.NewProviderServer("", "443"),
-	); err != nil {
-		return nil, fmt.Errorf("failed to set TLS-ALPN-01 provider: %w", err)
+	switch challengeMode {
+	case ChallengeModeTLSALPN01:
+		if err := client.Challenge.SetTLSALPN01Provider(
+			tlsalpn01.NewProviderServer("", "443"),
+		); err != nil {
+			return nil, fmt.Errorf("failed to set TLS-ALPN-01 provider: %w", err)
+		}
+	case ChallengeModeDNS01:
+		dnsProvider, err := cloudflare.NewDNSProvider()
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Cloudflare DNS provider: %w", err)
+		}
+		if err := client.Challenge.SetDNS01Provider(dnsProvider); err != nil {
+			return nil, fmt.Errorf("failed to set DNS-01 provider: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("invalid challenge mode: %s", challengeMode)
 	}
 
 	// Only register if certificate doesn't exist in cache

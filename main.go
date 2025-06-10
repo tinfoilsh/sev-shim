@@ -38,6 +38,7 @@ var config struct {
 	ListenPort    int      `yaml:"listen-port" default:"443"`
 	MetricsPort   int      `yaml:"metrics-port"`
 	UpstreamPort  int      `yaml:"upstream-port"`
+	ControlPort   int      `yaml:"control-port" default:"8086"`
 	Paths         []string `yaml:"paths"`
 	OriginDomains []string `yaml:"origins"`
 
@@ -193,12 +194,12 @@ func main() {
 	}
 
 	// Encode attestation into domains
-	attDomains, err := dcode.Encode(att, domain)
-	if err != nil {
-		log.Fatalf("Failed to encode attestation: %v", err)
-	}
 	domains := []string{domain}
 	if !*dev {
+		attDomains, err := dcode.Encode(att, domain)
+		if err != nil {
+			log.Fatalf("Failed to encode attestation: %v", err)
+		}
 		domains = append(domains, attDomains...)
 	}
 	for _, d := range domains {
@@ -376,6 +377,10 @@ func main() {
 			log.Fatal(http.ListenAndServe(listenAddr, promhttp.HandlerFor(r, promhttp.HandlerOpts{})))
 		}()
 	}
+
+	log.Printf("Starting control server on port %d", config.ControlPort)
+	controlServer := newControlServer()
+	go controlServer.Start(config.ControlPort)
 
 	listenAddr := fmt.Sprintf(":%d", config.ListenPort)
 	httpServer := &http.Server{
