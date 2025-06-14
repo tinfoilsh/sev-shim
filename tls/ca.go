@@ -18,6 +18,7 @@ import (
 	"github.com/go-acme/lego/v4/certificate"
 	"github.com/go-acme/lego/v4/challenge/tlsalpn01"
 	"github.com/go-acme/lego/v4/lego"
+	"github.com/go-acme/lego/v4/providers/dns/cloudflare"
 	"github.com/go-acme/lego/v4/registration"
 	log "github.com/sirupsen/logrus"
 )
@@ -38,14 +39,29 @@ func (u *acmeUser) GetPrivateKey() crypto.PrivateKey {
 	return u.key
 }
 
+var (
+	ChallengeModeTLSALPN01 ChallengeMode = "tls"
+	ChallengeModeDNS01     ChallengeMode = "dns"
+)
+
+type ChallengeMode string
+
 type CertManager struct {
 	config         *lego.Config
 	client         *lego.Client
 	cacheDir       string
 	certSigningKey *ecdsa.PrivateKey
+	domains        []string
 }
 
-func NewCertManager(email, cacheDir, dir string, port int, privateKey *ecdsa.PrivateKey) (*CertManager, error) {
+func NewCertManager(
+	domains []string,
+	email, cacheDir, caDir string,
+	challengeMode ChallengeMode,
+	port int,
+	privateKey *ecdsa.PrivateKey,
+	cloudflareAuthToken, cloudflareZoneToken string,
+) (*CertManager, error) {
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
@@ -57,7 +73,7 @@ func NewCertManager(email, cacheDir, dir string, port int, privateKey *ecdsa.Pri
 
 	user := &acmeUser{Email: email, key: acmeUserPrivateKey}
 	config := &lego.Config{
-		CADirURL:   dir,
+		CADirURL:   caDir,
 		User:       user,
 		HTTPClient: http.DefaultClient,
 		Certificate: lego.CertificateConfig{
@@ -70,10 +86,26 @@ func NewCertManager(email, cacheDir, dir string, port int, privateKey *ecdsa.Pri
 		return nil, fmt.Errorf("failed to create lego client: %w", err)
 	}
 
-	if err := client.Challenge.SetTLSALPN01Provider(
-		tlsalpn01.NewProviderServer("", fmt.Sprintf("%d", port)),
-	); err != nil {
-		return nil, fmt.Errorf("failed to set TLS-ALPN-01 provider: %w", err)
+	switch challengeMode {
+	case ChallengeModeTLSALPN01:
+		if err := client.Challenge.SetTLSALPN01Provider(
+			tlsalpn01.NewProviderServer("", fmt.Sprintf("%d", port)),
+		); err != nil {
+			return nil, fmt.Errorf("failed to set TLS-ALPN-01 provider: %w", err)
+		}
+	case ChallengeModeDNS01:
+		dnsConfig := cloudflare.NewDefaultConfig()
+		dnsConfig.AuthToken = cloudflareAuthToken
+		dnsConfig.ZoneToken = cloudflareZoneToken
+		dnsProvider, err := cloudflare.NewDNSProviderConfig(dnsConfig)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Cloudflare DNS provider: %w", err)
+		}
+		if err := client.Challenge.SetDNS01Provider(dnsProvider); err != nil {
+			return nil, fmt.Errorf("failed to set DNS-01 provider: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("invalid challenge mode: %s", challengeMode)
 	}
 
 	// Only register if certificate doesn't exist in cache
@@ -90,6 +122,7 @@ func NewCertManager(email, cacheDir, dir string, port int, privateKey *ecdsa.Pri
 	}
 
 	return &CertManager{
+		domains:        domains,
 		config:         config,
 		client:         client,
 		cacheDir:       cacheDir,
@@ -97,7 +130,7 @@ func NewCertManager(email, cacheDir, dir string, port int, privateKey *ecdsa.Pri
 	}, nil
 }
 
-func (m *CertManager) RequestCert(domains []string) (*tls.Certificate, error) {
+func (m *CertManager) Certificate() (*tls.Certificate, error) {
 	certFile := filepath.Join(m.cacheDir, "cert.pem")
 	keyFile := filepath.Join(m.cacheDir, "key.pem")
 
@@ -110,9 +143,9 @@ func (m *CertManager) RequestCert(domains []string) (*tls.Certificate, error) {
 		return &cert, nil
 	}
 
-	log.Debugf("Requesting certificate for: %v", domains)
+	log.Debugf("Requesting certificate for: %v", m.domains)
 	certResource, err := m.client.Certificate.Obtain(certificate.ObtainRequest{
-		Domains:    domains,
+		Domains:    m.domains,
 		Bundle:     true,
 		PrivateKey: m.certSigningKey,
 	})

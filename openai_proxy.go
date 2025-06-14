@@ -1,7 +1,10 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"strings"
 )
@@ -97,4 +100,21 @@ func (w *responseWriter) Flush() {
 	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
 		flusher.Flush()
 	}
+}
+
+func tokenizeAudioResponse(resp *http.Response) (int, error) {
+	reqBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, fmt.Errorf("failed to read request body: %w", err)
+	}
+	resp.Body.Close()
+	resp.Body = io.NopCloser(bytes.NewReader(reqBody))
+
+	var body struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(reqBody, &body); err != nil {
+		return 0, fmt.Errorf("failed to unmarshal request body: %w", err)
+	}
+	return len(body.Text) / 4, nil
 }
