@@ -40,18 +40,28 @@ func (u *acmeUser) GetPrivateKey() crypto.PrivateKey {
 }
 
 var (
-	ChallengeModeTLSALPN01 = "tlsalpn01"
-	ChallengeModeDNS01     = "dns01"
+	ChallengeModeTLSALPN01 ChallengeMode = "tls"
+	ChallengeModeDNS01     ChallengeMode = "dns"
 )
+
+type ChallengeMode string
 
 type CertManager struct {
 	config         *lego.Config
 	client         *lego.Client
 	cacheDir       string
 	certSigningKey *ecdsa.PrivateKey
+	domains        []string
 }
 
-func NewCertManager(email, cacheDir, caDir, challengeMode string, port int, privateKey *ecdsa.PrivateKey) (*CertManager, error) {
+func NewCertManager(
+	domains []string,
+	email, cacheDir, caDir string,
+	challengeMode ChallengeMode,
+	port int,
+	privateKey *ecdsa.PrivateKey,
+	cloudflareAuthToken, cloudflareZoneToken string,
+) (*CertManager, error) {
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
@@ -63,7 +73,7 @@ func NewCertManager(email, cacheDir, caDir, challengeMode string, port int, priv
 
 	user := &acmeUser{Email: email, key: acmeUserPrivateKey}
 	config := &lego.Config{
-		CADirURL:   dir,
+		CADirURL:   caDir,
 		User:       user,
 		HTTPClient: http.DefaultClient,
 		Certificate: lego.CertificateConfig{
@@ -84,7 +94,10 @@ func NewCertManager(email, cacheDir, caDir, challengeMode string, port int, priv
 			return nil, fmt.Errorf("failed to set TLS-ALPN-01 provider: %w", err)
 		}
 	case ChallengeModeDNS01:
-		dnsProvider, err := cloudflare.NewDNSProvider()
+		dnsConfig := cloudflare.NewDefaultConfig()
+		dnsConfig.AuthToken = cloudflareAuthToken
+		dnsConfig.ZoneToken = cloudflareZoneToken
+		dnsProvider, err := cloudflare.NewDNSProviderConfig(dnsConfig)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Cloudflare DNS provider: %w", err)
 		}
@@ -109,6 +122,7 @@ func NewCertManager(email, cacheDir, caDir, challengeMode string, port int, priv
 	}
 
 	return &CertManager{
+		domains:        domains,
 		config:         config,
 		client:         client,
 		cacheDir:       cacheDir,
@@ -116,7 +130,7 @@ func NewCertManager(email, cacheDir, caDir, challengeMode string, port int, priv
 	}, nil
 }
 
-func (m *CertManager) RequestCert(domains []string) (*tls.Certificate, error) {
+func (m *CertManager) Certificate() (*tls.Certificate, error) {
 	certFile := filepath.Join(m.cacheDir, "cert.pem")
 	keyFile := filepath.Join(m.cacheDir, "key.pem")
 
@@ -129,9 +143,9 @@ func (m *CertManager) RequestCert(domains []string) (*tls.Certificate, error) {
 		return &cert, nil
 	}
 
-	log.Debugf("Requesting certificate for: %v", domains)
+	log.Debugf("Requesting certificate for: %v", m.domains)
 	certResource, err := m.client.Certificate.Obtain(certificate.ObtainRequest{
-		Domains:    domains,
+		Domains:    m.domains,
 		Bundle:     true,
 		PrivateKey: m.certSigningKey,
 	})

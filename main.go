@@ -19,8 +19,6 @@ import (
 
 	"github.com/creasty/defaults"
 	"github.com/go-acme/lego/v4/lego"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
 	log "github.com/sirupsen/logrus"
 	"github.com/tinfoilsh/verifier/attestation"
 	"golang.org/x/time/rate"
@@ -35,28 +33,39 @@ import (
 var version = "dev"
 
 var config struct {
-	Domain        string   `yaml:"domain"`
-	ListenPort    int      `yaml:"listen-port" default:"443"`
-	MetricsPort   int      `yaml:"metrics-port"`
-	UpstreamPort  int      `yaml:"upstream-port"`
-	ControlPort   int      `yaml:"control-port" default:"8086"`
+	ListenPort   int `yaml:"listen-port" default:"443"`
+	UpstreamPort int `yaml:"upstream-port"`
+	ControlPort  int `yaml:"control-port" default:"8086"`
+
 	Paths         []string `yaml:"paths"`
 	OriginDomains []string `yaml:"origins"`
-	TLS           string   `yaml:"tls"`
+
+	TLSMode          string `yaml:"tls-mode" default:"production"` // self-signed | staging | production
+	TLSChallengeMode string `yaml:"tls-challenge" default:"tls"`   // tls | dns
 
 	ControlPlane string `yaml:"control-plane"`
 
-	RateLimit          float64 `yaml:"rate-limit"`
-	RateBurst          int     `yaml:"rate-burst"`
-	CacheDir           string  `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
-	Email              string  `yaml:"email" default:"tls@tinfoil.sh"`
-	PublishAttestation bool    `yaml:"publish-attestation"`
-	Verbose            bool    `yaml:"verbose"`
+	RateLimit float64 `yaml:"rate-limit"`
+	RateBurst int     `yaml:"rate-burst"`
+	CacheDir  string  `yaml:"cache-dir" default:"/mnt/ramdisk/certs"`
+	Email     string  `yaml:"email" default:"tls@tinfoil.sh"`
+
+	PublishAttestation bool `yaml:"publish-attestation"`
+	DummyAttestation   bool `yaml:"dummy-attestation"`
+
+	Verbose bool `yaml:"verbose"`
+}
+
+var externalConfig struct {
+	Domain              string `yaml:"domain"`
+	CloudflareDNSToken  string `yaml:"cloudflare-dns-token"`
+	CloudflareZoneToken string `yaml:"cloudflare-zone-token"`
 }
 
 var (
-	configFile = flag.String("c", "/mnt/ramdisk/shim.yml", "Path to config file")
-	dev        = flag.Bool("d", false, "Skip dcode domains, use dummy attestation, and enable verbose logging")
+	configFile         = flag.String("c", "/mnt/ramdisk/shim.yml", "Path to config file")
+	externalConfigFile = flag.String("e", "/mnt/ramdisk/external-config.yml", "Path to external config file")
+	dev                = flag.Bool("d", false, "Skip dcode domains, use dummy attestation, and enable verbose logging")
 )
 
 func cors(w http.ResponseWriter, r *http.Request) {
@@ -110,6 +119,20 @@ func main() {
 	if config.UpstreamPort == 0 {
 		log.Fatalf("Upstream port is not set")
 	}
+	if !slices.Contains([]string{"self-signed", "staging", "production"}, config.TLSMode) {
+		log.Fatalf("Invalid TLS mode: %s", config.TLSMode)
+	}
+
+	externalConfigBytes, err := os.ReadFile(*externalConfigFile)
+	if err != nil {
+		log.Fatalf("Failed to read external config file: %v", err)
+	}
+	if err := yaml.Unmarshal(externalConfigBytes, &externalConfig); err != nil {
+		log.Fatalf("Failed to unmarshal external config: %v", err)
+	}
+	if err := defaults.Set(&externalConfig); err != nil {
+		log.Fatalf("Failed to set defaults: %v", err)
+	}
 
 	if config.Verbose || *dev {
 		log.SetLevel(log.DebugLevel)
@@ -137,15 +160,9 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	requestsMetric := prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Name: "sev_shim_proxy_requests_total",
-			Help: "Number of HTTP requests",
-		},
-		[]string{},
-	)
-	r := prometheus.NewRegistry()
-	r.MustRegister(requestsMetric)
+	log.Printf("Starting control server on port %d", config.ControlPort)
+	controlServer := newControlServer()
+	go controlServer.Start(config.ControlPort)
 
 	// Generate key for TLS certificate
 	privateKey, err := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
@@ -153,15 +170,15 @@ func main() {
 		log.Fatalf("Failed to generate private key: %v", err)
 	}
 
-	if config.Domain == "" {
-		config.Domain = "localhost"
+	if externalConfig.Domain == "" {
+		externalConfig.Domain = "localhost"
 	}
 
 	// Request SEV-SNP attestation
 	keyFP := tlsutil.KeyFP(privateKey.Public().(*ecdsa.PublicKey))
 	log.Printf("Fetching attestation over %s", keyFP)
 	var att *attestation.Document
-	if config.Domain == "localhost" || *dev {
+	if externalConfig.Domain == "localhost" || *dev || config.DummyAttestation {
 		log.Warn("Using dummy attestation report")
 		att = &attestation.Document{
 			Format: "https://tinfoil.sh/predicate/dummy/v1",
@@ -174,11 +191,11 @@ func main() {
 		}
 	}
 
-	domains := []string{config.Domain}
+	domains := []string{externalConfig.Domain}
 
 	// Encode attestation into domains
 	if config.PublishAttestation {
-		attDomains, err := dcode.Encode(att, config.Domain)
+		attDomains, err := dcode.Encode(att, externalConfig.Domain)
 		if err != nil {
 			log.Fatalf("Failed to encode attestation: %v", err)
 		}
@@ -189,27 +206,34 @@ func main() {
 		log.Debugf("Domain: %s", d)
 	}
 
-	// Request TLS certificate
+	// Request prod cert if needed
 	var cert *tls.Certificate
-	if config.Domain != "localhost" && config.TLS != "self-signed" {
-		dir := lego.LEDirectoryProduction
-		if config.TLS == "staging" {
-			dir = lego.LEDirectoryStaging
-		}
-
-		certManager, err := tlsutil.NewCertManager(config.Email, config.CacheDir, dir, config.ListenPort, privateKey)
-		if err != nil {
-			log.Fatalf("Failed to create cert manager: %v", err)
-		}
-		cert, err = certManager.RequestCert(domains)
-		if err != nil {
-			log.Fatalf("Failed to request TLS certificate: %v", err)
-		}
-	} else {
-		log.Warn("No domain configured, using self signed TLS certificate")
+	if externalConfig.Domain == "localhost" || config.TLSMode == "self-signed" {
 		cert, err = tlsutil.Certificate(privateKey, domains...)
 		if err != nil {
 			log.Fatalf("Failed to generate self signed TLS certificate: %v", err)
+		}
+	} else { // Prod TLS cert
+		dir := lego.LEDirectoryProduction
+		if config.TLSMode == "staging" {
+			dir = lego.LEDirectoryStaging
+		}
+		certManager, err := tlsutil.NewCertManager(
+			domains,
+			config.Email, config.CacheDir, dir,
+			tlsutil.ChallengeMode(config.TLSChallengeMode),
+			config.ListenPort,
+			privateKey,
+			externalConfig.CloudflareDNSToken,
+			externalConfig.CloudflareZoneToken,
+		)
+		if err != nil {
+			log.Fatalf("Failed to create cert manager: %v", err)
+		}
+
+		cert, err = certManager.Certificate()
+		if err != nil {
+			log.Fatalf("Failed to request TLS certificate: %v", err)
 		}
 	}
 
@@ -236,8 +260,6 @@ func main() {
 		if r.Method == "OPTIONS" {
 			return
 		}
-
-		requestsMetric.WithLabelValues().Inc()
 
 		apiKey := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
 		if validator != nil && r.URL.Path == "/v1/chat/completions" {
@@ -357,18 +379,6 @@ func main() {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(att)
 	})
-
-	if config.MetricsPort > 0 {
-		log.Printf("Starting metrics server on port %d", config.MetricsPort)
-		go func() {
-			listenAddr := fmt.Sprintf(":%d", config.MetricsPort)
-			log.Fatal(http.ListenAndServe(listenAddr, promhttp.HandlerFor(r, promhttp.HandlerOpts{})))
-		}()
-	}
-
-	log.Printf("Starting control server on port %d", config.ControlPort)
-	controlServer := newControlServer()
-	go controlServer.Start(config.ControlPort)
 
 	listenAddr := fmt.Sprintf(":%d", config.ListenPort)
 	httpServer := &http.Server{
