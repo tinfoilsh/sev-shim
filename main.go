@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -9,7 +8,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -255,6 +253,37 @@ func main() {
 		tokenRecorder.Start()
 	}
 
+	proxy := httputil.ReverseProxy{
+		Director: func(req *http.Request) {
+			req.URL.Scheme = "http"
+			req.URL.Host = fmt.Sprintf("127.0.0.1:%d", config.UpstreamPort)
+			req.Header.Set("Host", "localhost")
+			req.Host = "localhost"
+			log.Debugf("Proxying request to %+v", req.URL.String())
+		},
+		Transport: &streamTransport{
+			tokenRecorder: tokenRecorder,
+			base:          http.DefaultTransport,
+		},
+		ModifyResponse: func(res *http.Response) error {
+			res.Header.Del("Access-Control-Allow-Origin")
+
+			if tokenRecorder != nil && res.Request != nil && res.Request.URL.Path == "/v1/audio/transcriptions" {
+				tokenCount, err := tokenizeAudioResponse(res)
+				if err != nil {
+					log.Warnf("Failed to tokenize audio response: %v", err)
+					return err
+				}
+
+				apiKey := strings.TrimPrefix(res.Request.Header.Get("Authorization"), "Bearer ")
+				tokenRecorder.Record(apiKey, "whisper", tokenCount)
+				log.Debugf("Transcribed %d tokens for %s", tokenCount, apiKey)
+			}
+
+			return nil
+		},
+	}
+
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		cors(w, r)
 		if r.Method == "OPTIONS" {
@@ -287,90 +316,12 @@ func main() {
 			}
 		}
 
-		if len(config.Paths) > 0 {
-			allowed := false
-			for _, path := range config.Paths {
-				if r.URL.Path == path {
-					allowed = true
-					break
-				}
-			}
-			if !allowed {
-				http.Error(w, "shim: 403 path not allowed", http.StatusForbidden)
-				return
-			}
+		if len(config.Paths) > 0 && !slices.Contains(config.Paths, r.URL.Path) {
+			http.Error(w, "shim: 403 path not allowed", http.StatusForbidden)
+			return
 		}
 
-		var writer = w
-		if controlPlaneURL != nil && r.URL.Path == "/v1/chat/completions" {
-			body, err := io.ReadAll(r.Body)
-			if err != nil {
-				log.Warnf("Failed to read request body: %v", err)
-				http.Error(w, "shim: 400 reading request body", http.StatusBadRequest)
-				return
-			}
-			r.Body.Close()
-
-			var cr chatRequest
-			if err := json.Unmarshal(body, &cr); err != nil {
-				log.Warnf("Failed to decode chat request: %v", err)
-				http.Error(w, "shim: 400 decoding chat request", http.StatusBadRequest)
-				return
-			}
-
-			var inputTokens int
-			for _, message := range cr.Messages {
-				switch content := message.Content.(type) {
-				case string:
-					inputTokens += len(content) / 4
-				case []contentPart:
-					for _, part := range content {
-						if part.Type == "text" {
-							inputTokens += len(part.Text) / 4
-						}
-					}
-				}
-			}
-			writer = &responseWriter{
-				Tokens:         inputTokens, // Start with the input tokens
-				ResponseWriter: w,
-				APIKey:         apiKey,
-				Model:          cr.Model,
-				tokenRecorder:  tokenRecorder,
-			}
-
-			r.Body = io.NopCloser(bytes.NewReader(body))
-		}
-
-		proxy := httputil.ReverseProxy{
-			Director: func(req *http.Request) {
-				req.URL.Scheme = "http"
-				req.URL.Host = fmt.Sprintf("127.0.0.1:%d", config.UpstreamPort)
-				req.Header.Set("Host", "localhost")
-				req.Host = "localhost"
-				log.Debugf("Proxying request to %+v", req.URL.String())
-			},
-			ModifyResponse: func(res *http.Response) error {
-				res.Header.Del("Access-Control-Allow-Origin")
-
-				if tokenRecorder != nil && res.Request != nil && res.Request.URL.Path == "/v1/audio/transcriptions" {
-					tokenCount, err := tokenizeAudioResponse(res)
-					if err != nil {
-						log.Warnf("Failed to tokenize audio response: %v", err)
-						return err
-					}
-
-					apiKey := strings.TrimPrefix(res.Request.Header.Get("Authorization"), "Bearer ")
-					tokenRecorder.Record(apiKey, "whisper", tokenCount)
-
-					log.Debugf("Transcribed %d tokens for %s", tokenCount, apiKey)
-				}
-
-				return nil
-			},
-		}
-
-		proxy.ServeHTTP(writer, r)
+		proxy.ServeHTTP(w, r)
 	})
 
 	mux.HandleFunc("/.well-known/tinfoil-attestation", func(w http.ResponseWriter, r *http.Request) {
