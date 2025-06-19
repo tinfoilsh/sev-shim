@@ -8,8 +8,8 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/tinfoilsh/sev-shim/dcode"
-	tlsutil "github.com/tinfoilsh/sev-shim/tls"
+	"github.com/tinfoilsh/tfshim/dcode"
+	tlsutil "github.com/tinfoilsh/tfshim/tls"
 )
 
 var (

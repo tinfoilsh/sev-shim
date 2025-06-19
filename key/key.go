@@ -2,8 +2,9 @@ package key
 
 import (
 	"errors"
-	"github.com/tinfoilsh/sev-shim/key/offline"
-	"github.com/tinfoilsh/sev-shim/key/online"
+
+	"github.com/tinfoilsh/tfshim/key/offline"
+	"github.com/tinfoilsh/tfshim/key/online"
 )
 
 var ErrAPIKeyRequired = errors.New("API key required")

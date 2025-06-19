@@ -5,29 +5,21 @@ before:
     - go mod tidy
 
 builds:
-  - id: sev-shim
+  - id: tfshim
     goos:
       - linux
     goarch:
       - amd64
 
-nfpms:
-  - package_name: tinfoil-sev-shim
-    file_name_template: tinfoil-sev-shim
-    vendor: Tinfoil
-    maintainer: Tinfoil <contact@tinfoil.sh>
-    section: utils
-    priority: extra
-    formats:
-      - deb
-    contents:
-      - src: ./systemd/tinfoil-sev-shim.service
-        dst: /lib/systemd/system/tinfoil-sev-shim.service
-        type: config
-    scripts:
-      postinstall: systemd/postinstall.sh
-      preremove: systemd/preremove.sh
-      postremove: systemd/postremove.sh
+archives:
+  - formats:
+      - binary
+    name_template: "{{ .Binary }}"
+    allow_different_binary_count: true
+
+checksum:
+  name_template: "{{ .ProjectName }}_checksums.txt"
+  algorithm: sha256
 
 changelog:
   sort: asc

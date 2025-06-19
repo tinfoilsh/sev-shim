@@ -1,4 +1,4 @@
-module github.com/tinfoilsh/sev-shim
+module github.com/tinfoilsh/tfshim
 
 go 1.23.2
 
