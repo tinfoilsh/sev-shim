@@ -19,10 +19,10 @@ import (
 	"golang.org/x/time/rate"
 	"gopkg.in/yaml.v3"
 
-	"github.com/tinfoilsh/sev-shim/dcode"
-	"github.com/tinfoilsh/sev-shim/key"
-	"github.com/tinfoilsh/sev-shim/key/online"
-	tlsutil "github.com/tinfoilsh/sev-shim/tls"
+	"github.com/tinfoilsh/tfshim/dcode"
+	"github.com/tinfoilsh/tfshim/key"
+	"github.com/tinfoilsh/tfshim/key/online"
+	tlsutil "github.com/tinfoilsh/tfshim/tls"
 )
 
 var version = "dev"
