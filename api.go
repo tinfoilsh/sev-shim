@@ -9,7 +9,7 @@ import (
 	"strings"
 
 	log "github.com/sirupsen/logrus"
-	"github.com/tinfoilsh/sev-shim/key"
+	"github.com/tinfoilsh/tfshim/key"
 	"github.com/tinfoilsh/verifier/attestation"
 )
 
