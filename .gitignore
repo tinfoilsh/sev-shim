@@ -2,3 +2,4 @@
 dist/
 tfshim
 shim.yml
+dev/external-config.yml
