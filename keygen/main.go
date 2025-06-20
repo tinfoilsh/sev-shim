@@ -6,7 +6,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/tinfoilsh/sev-shim/key/offline"
+	"github.com/tinfoilsh/tfshim/key/offline"
 )
 
 var (

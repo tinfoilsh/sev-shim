@@ -1,4 +1,5 @@
 .idea/
 dist/
-sev-shim
+tfshim
 shim.yml
+dev/external-config.yml
